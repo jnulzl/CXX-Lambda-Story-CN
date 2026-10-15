@@ -1,0 +1,1282 @@
+\section{Lambda 表达式的语法}
+
+下面是一张图示，展示了 C++11 中 Lambda 表达式的语法：
+
+\myGraphic{0.8}{images/fig_p028_1.png}{C++11 中的 Lambda 语法}
+
+现在来看几个示例，建立一些直观认识。
+
+\subsection{Lambda 表达式的几个示例}
+
+\begin{codebox}
+// 1. 最简单的 Lambda：
+[]{};
+\end{codebox}
+
+在第一个示例中，你可以看到一个“最小”的 Lambda 表达式。它只需要 \texttt{[]} 部分（lambda 引导符）以及函数体的空 \texttt{\{\}} 部分。形参列表 \texttt{()} 是可选的，在此处并不需要。
+
+\begin{codebox}
+// 2. 带两个形参：
+[](float f, int a) { return a * f; };
+[](int a, int b) { return a < b; };
+\end{codebox}
+
+在第二个示例中（这可能是最常见的一种），你可以看到实参被传入 \texttt{()} 部分，就像普通函数一样。返回类型不需要写出，因为编译器会自动推导它。
+
+\begin{codebox}
+// 3. 尾置返回类型：
+[](MyClass t) -> int { auto a = t.compute(); print(a); return a; };
+\end{codebox}
+
+在上面的示例中，我们显式指定了返回类型。自 C++11 起，尾置返回类型也可用于普通函数声明。
+
+\begin{codebox}
+// 4. 其他说明符：
+[x](int a, int b) mutable { ++x; return a < b; };
+[](float param) noexcept { return param*param; };
+[x](int a, int b) mutable noexcept { ++x; return a < b; };
+\end{codebox}
+
+最后一个示例表明，在 Lambda 函数体之前，你可以使用其他说明符。在代码中，我们使用了 \texttt{mutable}（以便能够修改被捕获的变量）以及 \texttt{noexcept}。第三个 Lambda 同时使用了 \texttt{mutable} 和 \texttt{noexcept}，且它们必须按此顺序出现（你不能写成 \texttt{noexcept mutable}，因为编译器会拒绝它）。
+
+虽然 \texttt{()} 部分是可选的，但如果你想使用 \texttt{mutable} 或 \texttt{noexcept}，那么表达式中就必须带上 \texttt{()}：
+
+\begin{codebox}
+// 5. 可选的 ()
+[x] { std::cout << x; }; // 不需要 ()
+[x] mutable { ++x; };
+// 无法编译！
+[x]() mutable { ++x; };
+// 正确 —— mutable 前需要 ()
+[] noexcept { };
+// 无法编译！
+[]() noexcept { };
+// 正确
+\end{codebox}
+
+同样的规则也适用于可以施加在 Lambda 上的其他说明符，例如 C++17 和 C++20 中的 \texttt{constexpr} 或 \texttt{consteval}。
+
+在看过这些基本示例之后，我们现在可以尝试理解它的工作原理，并学习 Lambda 表达式的全部能力。
+
+\section{核心定义}
+
+在继续深入之前，先引用 C++ 标准中的一些核心定义会很有帮助：
+
+来自 [expr.prim.lambda\#2]\footnote{\url{https://timsong-cpp.github.io/cppwp/n3337/expr.prim.lambda\#2}}：
+
+对 Lambda 表达式的求值会产生一个纯右值（prvalue）临时对象。这个临时对象称为闭包对象。
+
+顺带一提，Lambda 表达式是一个纯右值（“pure rvalue”）。这类表达式通常产生初始化，并出现在赋值号的右侧（或 return 语句中）。详见 C++ Reference\footnote{\url{https://en.cppreference.com/w/cpp/language/value_category}}。
+
+另一个定义来自 [expr.prim.lambda\#3]\footnote{\url{https://timsong-cpp.github.io/cppwp/n3337/expr.prim.lambda\#3}}：
+
+Lambda 表达式的类型（也就是闭包对象的类型）是一种唯一的、未命名的非联合体类类型——称为闭包类型。
+
+\subsection{编译器展开}
+
+从上述定义可以理解，编译器会从 Lambda 表达式生成某种唯一的闭包类型。随后我们通过闭包对象获得该类型的一个实例。
+
+下面是一个基本示例，演示如何编写 Lambda 表达式并将其传给 \texttt{std::for\_each}。作为对比，代码还展示了编译器生成的相应函数对象类型：
+
+\begin{codeboxt}{代码清单 2.1 Lambda 与对应的函数对象（在线代码见 @WandBox）}
+#include <algorithm>
+#include <iostream>
+#include <vector>
+int main() {
+struct {
+void operator()(int x) const {
+std::cout << x << '\n';
+}
+} someInstance;
+const std::vector<int> v { 1, 2, 3 };
+std::for_each(v.cbegin(), v.cend(), someInstance);
+std::for_each(v.cbegin(), v.cend(), [] (int x) {
+std::cout << x << '\n';
+}
+);
+}
+\end{codeboxt}
+
+在示例中，编译器把 \texttt{[](int x) \{ std::cout << x << '\textbackslash n'; \}}……翻译成一个匿名函数对象，其简化形式如下：
+
+\begin{codebox}
+struct {
+void operator()(int x) const {
+std::cout << x << '\n';
+}
+} someInstance;
+\end{codebox}
+
+这种翻译或“展开”的过程可以很方便地在 C++ Insights\footnote{\url{https://cppinsights.io/}} 上查看，这是一个在线工具，它接收有效的 C++ 代码，然后生成编译器所产生的源代码版本：例如 Lambda 对应的匿名函数对象、模板实例化以及许多其他 C++ 特性。
+
+在接下来的各节中，我们将更深入地探讨 Lambda 表达式的各个组成部分。
+
+\section{Lambda 表达式的类型}
+
+由于编译器为每个 Lambda（闭包类型）生成一个唯一的名字，因此无法提前“拼写”出它。
+
+这就是为什么你必须使用 \texttt{auto}（或 \texttt{decltype}）来推导其类型。
+
+\begin{codebox}
+auto myLambda = [](int a) -> double { return 2.0 * a; };
+\end{codebox}
+
+此外，如果你有两个看起来相同的 Lambda：
+
+\begin{codebox}
+auto firstLam
+= [](int x) { return x * 2; };
+auto secondLam = [](int x) { return x * 2; };
+\end{codebox}
+
+即便“底层代码”相同，它们的类型也不同！编译器必须为每个 Lambda 声明两个唯一的未命名类型。
+
+我们可以用下面的代码证明这一特性：
+
+\begin{codeboxt}{代码清单 2.1 类型不同，代码相同（在线代码见 @Wandbox）}
+#include <type_traits>
+int main() {
+const auto oneLam = [](int x) noexcept { return x * 2; };
+const auto twoLam = [](int x) noexcept { return x * 2; };
+static_assert(!std::is_same<decltype(oneLam), decltype(twoLam)>::value,
+"must be different!");
+}
+\end{codeboxt}
+
+上面的示例验证了 \texttt{oneLam} 和 \texttt{twoLam} 的闭包类型并不相同。
+
+
+在 C++17 中，我们可以使用不带消息的 \texttt{static\_assert}，也可以使用类型特性的辅助变量模板 \texttt{is\_same\_v}：
+
+\begin{codebox}
+static_assert(std::is_same_v<double, decltype(baz(10))>);
+\end{codebox}
+
+不过，虽然你不知道确切的名字，但可以写出 Lambda 的签名，然后将其存入 \texttt{std::function}。一般来说，用定义为 \texttt{auto} 的 Lambda 无法做到的事情，若该 Lambda 通过 \texttt{std::function<>} 类型来“表达”，就能做到。例如，前面的 Lambda 签名为 \texttt{double(int)}，因为它接受 \texttt{int} 作为形参并返回 \texttt{double}。我们可以这样创建一个 \texttt{std::function} 对象：
+
+\begin{codebox}
+std::function<double(int)> myFunc = [](int a) -> double { return 2.0 * a; };
+\end{codebox}
+
+\texttt{std::function} 是一个重量级对象，因为它需要处理所有可调用对象。为此，它需要诸如类型双关（type punning）甚至动态内存分配之类的高级内部机制。
+
+我们可以通过一个简单的实验来查看它的大小：
+
+\begin{codeboxt}{代码清单 2.3 std::function 与 auto 类型推导（在线代码见 @Wandbox）}
+#include <functional>
+#include <iostream>
+int main() {
+const auto myLambda = [](int a) noexcept -> double {
+return 2.0 * a;
+};
+const std::function<double(int)> myFunc =
+[](int a) noexcept -> double {
+return 2.0 * a;
+};
+std::cout << "sizeof(myLambda) is " << sizeof(myLambda) << '\n';
+std::cout << "sizeof(myFunc) is " << sizeof(myFunc) << '\n';
+return myLambda(10) == myFunc(10);
+}
+\end{codeboxt}
+
+在 GCC 上，代码会输出：
+
+\begin{codebox}
+sizeof(myLambda) is 1
+sizeof(myFunc) is 32
+\end{codebox}
+
+因为 \texttt{myLambda} 只是一个无状态 Lambda，它也是一个空类，没有任何数据成员字段，所以它的最小尺寸只有一个字节。另一方面，\texttt{std::function} 版本要大得多——32 字节。因此，如果可以，请依赖 \texttt{auto} 类型推导来获得尽可能小的闭包对象。
+
+谈到 \texttt{std::function} 时，还有一点很重要：该类型不支持仅可移动（moveable-only）的闭包。你可以在 C++14 章节中关于可移动类型的部分阅读更多相关内容。
+
+\subsection{构造函数与复制}
+
+在该特性的规范 [expr.prim.lambda]\footnote{\url{https://timsong-cpp.github.io/cppwp/n3337/expr.prim.lambda\#19}} 中，我们还能读到如下内容：
+
+与 Lambda 表达式关联的闭包类型，其默认构造函数（见 [dcl.fct.def.delete]）被删除，且复制赋值运算符也被删除。
+
+这就是为什么你不能写出：
+
+\begin{codebox}
+auto foo = [&x, &y]() { ++x; ++y; };
+decltype(foo) fooCopy;
+\end{codebox}
+
+这在 GCC 上会产生如下错误：
+
+\begin{codebox}
+error: use of deleted function 'main()::<lambda()>::<lambda>()'
+decltype(foo) fooCopy;
+^~~~~~~
+note: a lambda closure type has a deleted default constructor
+\end{codebox}
+
+不过，你可以复制 Lambda：
+
+\begin{codeboxt}{代码清单 2.4 复制 Lambda（在线代码见 @Wandbox）}
+#include <type_traits>
+int main() {
+const auto firstLam = [](int x) noexcept { return x * 2; };
+const auto secondLam = firstLam;
+static_assert(std::is_same<decltype(firstLam), decltype(secondLam)>::value,
+"must be the same");
+}
+\end{codeboxt}
+
+如果你复制一个 Lambda，那么你也复制了它的状态。这一点在我们讨论捕获变量时很重要。在这种情况下，闭包类型将被捕获的变量存储为成员字段。执行 Lambda 复制会复制那些数据成员字段。
+
+
+展望未来
+
+在 C++20 中，无状态 Lambda 将可默认构造且可赋值。
+
+\section{调用运算符}
+
+你写入 Lambda 函数体的代码会被“翻译”为相应闭包类型中 \texttt{operator()} 的代码。
+
+默认情况下，在 C++11 中，它是一个 \texttt{const inline} 成员函数。例如：
+
+\begin{codebox}
+auto lam = [](double param) { /* 执行某些操作 */ };
+\end{codebox}
+
+会展开为类似如下的形式：
+
+\begin{codebox}
+struct __anonymousLambda {
+inline void operator()(double param) const { /* 执行某些操作 */ }
+};
+\end{codebox}
+
+我们来讨论这种做法的后果，以及该如何修改所生成的调用运算符声明。
+
+\subsection{重载}
+
+值得一提的一点是，在定义 Lambda 时，无法创建接受不同实参的“重载”Lambda。例如：
+
+\begin{codebox}
+// 无法编译！
+auto lam = [](double param) { /* 执行某些操作 */ };
+auto lam = [](int param) { /* 执行某些操作 */ };
+\end{codebox}
+
+上面的代码无法编译，因为编译器无法将这两个 Lambda 翻译进同一个函数对象。此外，你也不能重新定义同一个变量。另一方面，创建一个拥有两个调用运算符的函数对象类型则是可能的：
+
+\begin{codebox}
+struct MyFunctionObject {
+inline void operator()(double param) const { /* 执行某些操作 */ }
+inline void operator()(int param) const { /* 执行某些操作 */ }
+};
+\end{codebox}
+
+\texttt{MyFunctionObject} 现在可以处理 \texttt{double} 和 \texttt{int} 实参。如果你希望 Lambda 有类似的行为，可以参阅本章中关于从 Lambda 继承的小节，以及 C++17 章节中关于重载模式的内容。
+
+\subsection{属性}
+
+Lambda 的语法允许使用 C++11 的属性，形式为 \texttt{[[attr\_name]]}。
+
+不过，如果你将属性施加于 Lambda，它作用于调用运算符的类型，而非运算符本身。这就是为什么目前（即便到了 C++20）也没有什么属性适合放在 Lambda 上。大多数编译器甚至会报告错误。如果我们拿一个 C++17 属性并尝试在表达式上使用它：
+
+\begin{codebox}
+auto myLambda = [](int a) [[nodiscard]] { return a * a; };
+\end{codebox}
+
+这在 Clang 上会产生如下错误（见在线代码 @Wandbox\footnote{\url{https://wandbox.org/permlink/3zfzL1NNpPXXgLOx}}）：
+
+\begin{codebox}
+error: 'nodiscard' attribute cannot be applied to types
+\end{codebox}
+
+虽然在理论上 Lambda 语法已为此做好准备，但目前还没有适用的属性。
+
+\subsection{其他修饰符}
+
+我们在语法小节中简要提及了这个话题，但你并不局限于闭包类型调用运算符的默认声明。在 C++11 中，你可以添加 \texttt{mutable} 或异常说明。
+
+
+本书中较长的示例在可能的情况下，会尽量用 \texttt{const} 标记闭包对象，并让 Lambda 为 \texttt{noexcept}。
+
+你可以在形参声明子句之后指定 \texttt{mutable} 和 \texttt{noexcept} 来使用这些关键字：
+
+\begin{codebox}
+auto myLambda = [](int a) mutable noexcept { /* 执行某些操作 */ }
+\end{codebox}
+
+编译器会将这段代码展开为：
+
+\begin{codebox}
+struct __anonymousLambda {
+inline void operator()(double param) noexcept { /* 执行某些操作 */ }
+};
+\end{codebox}
+
+请注意，\texttt{const} 关键字现在没有了，调用运算符现在可以修改 Lambda 的数据成员。
+
+但数据成员是什么呢？我们如何声明 Lambda 的数据成员？请参阅下一节关于“捕获”变量的内容：
+
+\section{捕获}
+
+\texttt{[]} 不仅引入 Lambda 表达式，还持有被捕获变量的列表。它被称为“捕获子句”。
+
+通过从 Lambda 表达式的外部作用域捕获一个变量，你会在闭包类型中创建一个非静态数据成员。随后，在 Lambda 函数体内，你可以访问它。
+
+我们在 C++98/03 章节中为 \texttt{Printer} 函数对象做过类似的事情。在那个类中，我们添加了一个数据成员 \texttt{std::string strText}，它在构造函数中被初始化。
+
+拥有数据成员使我们能够在可调用对象中存储状态。
+
+C++11 中捕获的语法如下：
+
+\begin{tabular}{ll}
+\hline
+语法 & 说明 \\
+\hline
+\texttt{[\&]} & 按引用捕获在可达作用域中声明的、所有具有自动存储期的变量 \\
+\texttt{[=]} & 按值（创建副本）捕获在可达作用域中声明的、所有具有自动存储期的变量 \\
+\texttt{[x, \&y]} & 显式地按值捕获 x、按引用捕获 y \\
+\texttt{[args...]} & 捕获一个模板实参包，全部按值 \\
+\texttt{[\&args...]} & 捕获一个模板实参包，全部按引用 \\
+\texttt{[this]} & 捕获成员函数内部的 \texttt{this} 指针 \\
+\hline
+\end{tabular}
+
+请注意，对于 \texttt{[=]} 和 \texttt{[\&]} 的情况，编译器会为 Lambda 函数体内使用的所有变量生成数据成员。这是一种方便的语法，当你不想显式指明捕获哪些变量时很适用。
+
+下面是对基本语法及示例的总结：
+
+\begin{codebox}
+int x = 2, y = 3;
+const auto l1 = []()
+{ return 1; };
+// 无捕获
+const auto l2 = [=]() { return x; };
+// lambda 中使用的
+// 所有变量都被拷贝
+const auto l3 = [&]() { return y; };
+// lambda 中使用的
+// 所有变量都被引用
+const auto l4 = [x]() { return x; };
+// 仅 x 按值（拷贝）
+// const auto lx = [=x]() { return x; };
+// 错误语法，无需
+// = 来显式拷贝 x
+const auto l5 = [&y]()
+{ return y; };
+// 仅 y 按引用
+const auto l6 = [x, &y]() { return x * y; }; // x 按值、y 按引用
+const auto l7 = [=, &x]() { return x + y; }; // 除 x 外全部按值
+// 它是按引用
+const auto l8 = [&, y]() { return x - y; };
+// 除 y 外全部按引用，
+// y 是按值
+\end{codeboxt}
+
+
+什么是“自动存储期”（Automatic Storage Duration）？
+
+程序中的所有对象都有四种可能的“存储”方式：自动（automatic）、静态（static）、线程（thread）或动态（dynamic）。自动意味着存储在进入一个作用域（例如函数）时分配。大多数局部变量都具有自动存储期（除了声明为 \texttt{static}、\texttt{extern} 或 \texttt{thread\_local} 的那些）。更多内容见 @CppReference - storage duration\footnote{\url{https://en.cppreference.com/w/cpp/language/storage_duration}}。
+
+为了理解被捕获变量会发生什么，我们来看下面的代码：
+
+\begin{codebox}
+std::string str {"Hello World"};
+auto foo = [str]() { std::cout << str << '\n'; };
+foo();
+\end{codebox}
+
+对于上面的 Lambda，\texttt{str} 按值被捕获（即它被拷贝）。编译器可能会生成如下的局部函数对象：
+
+\begin{codebox}
+struct _unnamedLambda {
+inline void operator()() const {
+std::cout << str << '\n';
+}
+std::string str;
+};
+\end{codebox}
+
+当你把一个变量传入捕获子句时，它随后被用于直接初始化数据成员 \texttt{str}。因此，前面的示例可以“展开”为：
+
+\begin{codebox}
+std::string str {"Hello World"};
+_unnamedLambda foo { str };
+foo();
+\end{codebox}
+
+准确地说，标准在 [expr.prim.lambda\#21]\footnote{\url{https://timsong-cpp.github.io/cppwp/n3337/expr.prim.lambda\#21}} 中提到了这一行为：
+
+对 Lambda 表达式求值时，被按拷贝捕获的实体被用于直接初始化所生成的闭包对象的每个相应的非静态数据成员。
+
+再看一个包含两个变量的示例：
+
+\begin{codebox}
+int x = 1, y = 1;
+std::cout << x << " " << y << '\n';
+const auto foo = [&x, &y]() noexcept { ++x; ++y; };
+foo();
+std::cout << x << " " << y << '\n';
+\end{codebox}
+
+对于上面的 Lambda，编译器可能会生成如下的局部函数对象：
+
+\begin{codebox}
+struct _unnamedLambda {
+void operator()() const noexcept {
+++x; ++y;
+}
+int& x;
+int& y;
+};
+\end{codebox}
+
+由于我们按引用捕获 \texttt{x} 和 \texttt{y}，闭包类型将包含同样也是引用的两个数据成员。
+
+
+按值捕获的变量的值，是 Lambda 被定义时的值——而不是被使用时的值！按引用捕获的变量的值，是 Lambda 被使用时的值——而不是被定义时的值。
+
+C++ 的闭包不会延长被捕获引用的生命周期。请确保在 Lambda 被调用时，被捕获的变量仍然存活。
+
+\subsection{生成的代码}
+
+在本书中，我会展示一种可能的编译器生成代码，用一个 \texttt{struct} 来定义闭包类类型。不过，这只是一个简化——一种心智模型——而在编译器内部，情况可能有所不同。
+
+例如，在 Clang 中，生成的 AST（抽象语法树，Abstract Syntax Tree）使用 \texttt{class} 来表示闭包。调用运算符被定义为 \texttt{public}，而数据成员则是 \texttt{private}。
+
+这就是为什么你不能写出：
+
+\begin{codebox}
+int x = 0;
+auto lam = [x]() { std::cout << x; };
+lam.x = 10; // ??
+\end{codebox}
+
+在 GCC（或类似的 Clang）中，你会得到：
+
+\begin{codebox}
+error: 'struct main()::<lambda()>' has no member named 'x'
+\end{codebox}
+
+另一方面，规范中有一项重要的内容提到，被捕获的变量是被直接初始化的，而对于私有成员（对于我们代码中的普通类）这是不可能的。这意味着编译器可以在这里做一些“魔法”，并生成更高效的代码（无需拷贝变量，甚至无需移动它们）。
+
+你可以在 Andreas Fertig（C++ Insights 的创建者）撰写的一篇精彩博客文章中阅读更多关于 Lambda 内部机制的内容：Under the covers of C++ lambdas - Part 2: Captures, captures, captures\footnote{《Effective Modern C++：改善 C++11 和 C++14 使用的 42 个具体办法》第 1 版，Scott Meyers 著，2014 年}。
+
+\subsection{全部捕获还是显式捕获？}
+
+虽然指定 \texttt{[=]} 或 \texttt{[\&]} 可能很方便，因为它会捕获所有具有自动存储期的变量，但显式捕获一个变量则更清晰。这样，编译器就能针对你不希望出现的效应发出警告（例如，参见关于全局变量和静态变量的说明）。
+
+你也可以在 Scott Meyers 所著的《Effective Modern C++》第 31 条中阅读更多内容\footnote{《Effective Modern C++：改善 C++11 和 C++14 使用的 42 个具体办法》第 1 版，Scott Meyers 著，2014 年}：“避免使用默认捕获模式。”
+
+\subsection{mutable 关键字}
+
+默认情况下，闭包类型的 \texttt{operator()} 被标记为 \texttt{const}，因此你无法在 Lambda 的函数体内修改被捕获的变量。
+
+如果你想改变这一行为，需要在形参列表之后添加 \texttt{mutable} 关键字。这种语法实际上会从闭包类型的调用运算符声明中去掉 \texttt{const}。如果你有一个带有 \texttt{mutable} 的简单 Lambda 表达式：
+
+\begin{codebox}
+int x = 1;
+auto foo = [x]() mutable { ++x; };
+\end{codebox}
+
+它会被“展开”为如下的函数对象：
+
+\begin{codebox}
+struct __lambda_x1 {
+void operator()() { ++x; }
+int x;
+};
+\end{codebox}
+
+如你所见，调用运算符可以修改成员字段的值。
+
+\begin{codeboxt}{代码清单 2.5 按值捕获两个变量并使用 mutable（在线代码见 @Wandbox）}
+#include <iostream>
+int main() {
+const auto print = [](const char* str, int x, int y) {
+std::cout << str << ": " << x << " " << y << '\n';
+};
+int x = 1, y = 1;
+print("in main()", x, y);
+auto foo = [x, y, &print]() mutable {
+++x;
+++y;
+print("in foo()", x, y);
+};
+foo();
+print("in main()", x, y);
+}
+\end{codeboxt}
+
+输出：
+
+\begin{codebox}
+in main(): 1 1
+in foo(): 2 2
+in main(): 1 1
+\end{codebox}
+
+在上面的示例中，我们可以修改 \texttt{x} 和 \texttt{y} 的值。由于它们仅仅是来自外围作用域的 \texttt{x} 和 \texttt{y} 的副本，因此在 \texttt{foo} 被调用后，我们看不到它们的更新后的值。
+
+另一方面，如果你按引用捕获，就无需对 Lambda 施加 \texttt{mutable} 来修改值。这是因为被捕获的数据成员是引用，这意味着你无论如何都无法将它们重新绑定到新对象，但可以修改被引用的值。
+
+\begin{codebox}
+int x = 1;
+std::cout << x << '\n';
+const auto foo = [&x]() noexcept { ++x; };
+foo();
+std::cout << x << '\n';
+\end{codebox}
+
+在上面的示例中，Lambda 并未使用 \texttt{mutable} 修饰，但它可以修改被引用的值。
+
+需要注意的一件重要事情是：当你使用 \texttt{mutable} 时，就不能再用 \texttt{const} 来标记你所得到的闭包对象，否则会阻止你调用该 Lambda！
+
+\begin{codebox}
+int x = 10;
+const auto lam = [x]() mutable { ++x; }
+lam(); // 无法编译！
+\end{codebox}
+
+最后一行无法编译，因为我们无法在 \texttt{const} 对象上调用非 \texttt{const} 成员函数。
+
+\subsection{调用计数器——捕获变量的一个示例}
+
+在我们继续探讨一些更复杂的捕获主题之前，可以先稍作停留，关注一个更具实用性的示例。
+
+当你想使用标准库中的某个现有算法并改变其默认行为时，Lambda 表达式就非常方便。例如，对于 \texttt{std::sort}，你可以编写自己的比较函数。
+
+但我们可以更进一步，用一个调用计数器来增强这个比较器。请看：
+
+\begin{codeboxt}{代码清单 2.6 调用计数器（在线代码见 @Compiler Explorer）}
+#include <algorithm>
+#include <iostream>
+#include <vector>
+int main() {
+std::vector<int> vec { 0, 5, 2, 9, 7, 6, 1, 3, 4, 8 };
+size_t compCounter = 0;
+std::sort(vec.begin(), vec.end(),
+[&compCounter](int a, int b) noexcept {
+++compCounter;
+return a < b;
+}
+);
+std::cout << "number of comparisons: " << compCounter << '\n';
+for (const auto& v : vec)
+std::cout << v << ", ";
+}
+\end{codeboxt}
+
+示例中提供的比较器的工作方式与默认的比较器相同，它返回 \texttt{a} 是否小于 \texttt{b}，因此我们采用了从最小到最大的自然顺序。
+
+不过，传给 \texttt{std::sort} 的 Lambda 还捕获了一个局部变量 \texttt{compCounter}。该变量随后被用于统计排序算法对比较器的所有调用次数。
+
+\subsection{捕获全局变量}
+
+如果你有一个全局变量，并在 Lambda 中使用了 \texttt{[=]}，你可能会以为你的全局对象也按值被捕获了……但事实并非如此。请看代码：
+
+\begin{codeboxt}{代码清单 2.7 捕获全局变量（在线代码见 @Wandbox）}
+#include <iostream>
+int global = 10;
+int main() {
+std::cout << global << '\n';
+auto foo = [=]() mutable noexcept { ++global; };
+foo();
+std::cout << global << '\n';
+const auto increaseGlobal = []() noexcept { ++global; };
+increaseGlobal();
+std::cout << global << '\n';
+const auto moreIncreaseGlobal = [global]() noexcept { ++global; };
+moreIncreaseGlobal();
+std::cout << global << '\n';
+}
+\end{codeboxt}
+
+上面的示例定义了 \texttt{global}，然后在 \texttt{main()} 函数中使用它定义了几个 Lambda。如果你运行这段代码，那么无论采用何种捕获方式，它始终指向该全局对象，并且不会创建任何局部副本。
+
+这是因为只有具有自动存储期的变量才能被捕获。GCC 甚至会报告如下警告：
+
+\begin{codebox}
+warning: capture of variable 'global' with non-automatic
+storage duration
+\end{codebox}
+
+只有当你显式捕获一个全局变量时，才会出现此警告；因此，如果你使用 \texttt{[=]}，编译器不会帮你发现这个问题。
+
+Clang 编译器则更有帮助，因为它会产生一个错误：
+
+\begin{codebox}
+error: 'global' cannot be captured because it does not have
+automatic storage duration
+\end{codebox}
+
+参见 Clang 的在线示例 @Wandbox\footnote{\url{https://wandbox.org/permlink/4V91bkuz8NvHrDDA}}。
+
+\subsection{捕获静态变量}
+
+与捕获全局变量类似，对于静态对象你也会遇到相同的问题：
+
+\begin{codeboxt}{代码清单 2.8 捕获静态变量（在线代码见 @Wandbox）}
+#include <iostream>
+void bar() {
+static int static_int = 10;
+std::cout << static_int << '\n';
+auto foo = [=]() mutable noexcept{ ++static_int; };
+foo();
+std::cout << static_int << '\n';
+const auto increase = []() noexcept { ++static_int; };
+increase();
+std::cout << static_int << '\n';
+const auto moreIncrease = [static_int]() noexcept { ++static_int; };
+moreIncrease();
+std::cout << static_int << '\n';
+}
+int main() {
+bar();
+}
+\end{codeboxt}
+
+这一次我们尝试捕获一个静态变量，然后修改它的值，但由于它不具有自动存储期，编译器无法做到这一点。
+
+输出：
+
+\begin{codebox}
+10
+11
+12
+13
+\end{codebox}
+
+当你按名字捕获该变量 \texttt{[static\_int]} 时，GCC 会报告一个警告，而 Clang 会显示错误。
+
+\subsection{捕获类成员与 this 指针}
+
+当你处于类的成员函数中，并想捕获一个数据成员时，情况会变得稍微复杂一些。由于所有非静态数据成员都与 \texttt{this} 指针相关联，它也必须被存储在某个地方。
+
+请看：
+
+\begin{codeboxt}{代码清单 2.9 捕获数据成员时的错误（在线代码见 @Wandbox）}
+#include <iostream>
+struct Baz {
+void foo() {
+const auto lam = [s]() { std::cout << s; };
+lam();
+}
+std::string s;
+};
+int main() {
+Baz b;
+b.foo();
+}
+\end{codeboxt}
+
+这段代码尝试捕获 \texttt{s}，它是一个数据成员。但编译器会发出如下错误消息：
+
+\begin{codebox}
+In member function 'void Baz::foo()':
+error: capture of non-variable 'Baz::s'
+error: 'this' was not captured for this lambda function
+\end{codebox}
+
+要解决这个问题，你必须捕获 \texttt{this} 指针。这样你就能访问数据成员了。
+
+我们可以把代码更新为：
+
+\begin{codebox}
+struct Baz {
+void foo() {
+const auto lam = [this]() { std::cout << s; };
+lam();
+}
+std::string s;
+};
+\end{codebox}
+
+现在没有任何编译器错误了。
+
+你也可以使用 \texttt{[=]} 或 \texttt{[\&]} 来捕获 \texttt{this}（在 C++11/14 中它们效果相同！）。
+
+请注意，我们按值捕获了 \texttt{this}……其实是捕获到一个指针。这就是为什么你能访问的是原始的数据成员，而非它的副本。
+
+在 C++11（甚至 C++14）中，你不能写出：
+
+\begin{codebox}
+auto lam = [*this]() { std::cout << s; };
+\end{codebox}
+
+这段代码在 C++11/14 中无法编译；不过，它在 C++17 中是允许的。
+
+如果你在单个方法的上下文中使用 Lambda，那么捕获 \texttt{this} 是没有问题的。
+
+但如果是更复杂的情况呢？
+
+你知道下面的代码会发生什么吗？
+
+\begin{codeboxt}{代码清单 2.10 从成员函数返回 Lambda}
+#include <functional>
+#include <iostream>
+struct Baz {
+std::function<void()> foo() {
+return [=] { std::cout << s << '\n'; };
+}
+std::string s;
+};
+int main() {
+auto f1 = Baz{"abc"}.foo();
+auto f2 = Baz{"xyz"}.foo();
+f1();
+f2();
+}
+\end{codeboxt}
+
+这段代码声明了一个 \texttt{Baz} 对象，然后调用 \texttt{foo()}。请注意，\texttt{foo()} 返回了一个 Lambda（存储在 \texttt{std::function} 中），它捕获了类的一个成员\footnote{\url{https://wandbox.org/permlink/FOgbNGoQHOmepBgY}}。
+
+由于我们使用了临时对象，因此无法确定当你调用 \texttt{f1} 和 \texttt{f2} 时会发生什么。这是一个悬垂引用问题，会产生未定义行为（Undefined Behaviour）。
+
+类似于：
+
+\begin{codebox}
+struct Bar {
+std::string const& foo() const { return s; };
+std::string s;
+};
+auto&& f1 = Bar{"abc"}.foo(); // 悬垂引用
+\end{codebox}
+
+用代码试试看 @Wandbox\footnote{\url{https://wandbox.org/permlink/FOgbNGoQHOmepBgY}}。
+
+如果你显式写出捕获（\texttt{[s]}），就会得到一个编译器错误。
+
+\begin{codebox}
+std::function<void()> foo() {
+return [s] { std::cout << s << '\n'; };
+} // 错误：'this' 未被捕获！
+\end{codebox}
+
+总而言之，当 Lambda 的生命周期可能超过对象本身时，捕获 \texttt{this} 可能会变得棘手。在使用异步调用或多线程时，就可能出现这种情况。
+
+我们会在 C++17 章回到这个话题。参见 C++17 章第 99 页的“Concurrent Execution Using Lambdas”（使用 Lambda 进行并发执行）。
+
+\subsection{仅可移动对象}
+
+如果你有一个仅可移动（moveable-only）的对象（例如 \texttt{unique\_ptr}），那么你就无法将其作为被捕获变量移动进 Lambda。按值捕获不起作用；你只能按引用捕获。
+
+\begin{codebox}
+std::unique_ptr<int> p(new int{10});
+auto foo = [p]() {};
+// 无法编译……
+auto foo_ref = [&p]() { }; // 可编译，但所有权
+// 并未被转移
+\end{codebox}
+
+在上面的示例中，你可以看到捕获 \texttt{unique\_ptr} 的唯一方式是按引用。不过，这种方法未必是最佳选择，因为它不会转移指针的所有权。
+
+在下一章关于 C++14 的内容中，你会看到这个问题借助带初始化器的捕获得到了解决。请转到 C++14 章（第 57 页）的“Move”一节继续了解该话题。
+
+\subsection{保留 const}
+
+如果你捕获一个 \texttt{const} 变量，那么其常量性会被保留：
+
+\begin{codeboxt}{代码清单 2.11 保留 const（在线代码见 @Wandbox）}
+#include <iostream>
+#include <type_traits>
+int main() {
+const int x = 10;
+auto foo = [x] () mutable {
+std::cout << std::is_const<decltype(x)>::value << '\n';
+x = 11;
+};
+foo();
+}
+\end{codeboxt}
+
+上面的代码无法编译，因为被捕获的变量是常量。下面是这个示例可能生成的某个函数对象：
+
+\begin{codebox}
+struct __lambda_x {
+void operator()() { x = 11; /*错误！*/ }
+const int x;
+};
+\end{codebox}
+
+你也可以用 @CppInsight 把这段代码试一试\footnote{\url{https://cppinsights.io/s/7b2f8b10}}。
+
+\subsection{捕获参数包}
+
+在结束关于捕获子句的讨论之前，我们应该提到，你还可以借助可变参数模板（variadic templates）来使用捕获。编译器会把参数包展开为一个非静态数据成员的列表，如果你希望在模板化代码中使用 Lambda，这会很方便。
+
+例如，下面是一个对捕获进行试验的代码示例：
+
+\begin{codeboxt}{代码清单 2.12 捕获可变参数包（在线代码见 @Wandbox）}
+#include <iostream>
+#include <tuple>
+template<class... Args>
+void captureTest(Args... args) {
+const auto lambda = [args...] {
+const auto tup = std::make_tuple(args...);
+std::cout << "tuple size: " <<
+std::tuple_size<decltype(tup)>::value << '\n';
+std::cout << "tuple 1st:\n" << std::get<0>(tup) << '\n';
+};
+lambda(); // call it
+}
+int main() {
+captureTest(1, 2, 3, 4);
+captureTest("Hello world", 10.0f);
+}
+\end{codeboxt}
+
+运行代码后，我们会得到以下输出：
+
+\begin{codebox}
+tuple size: 4
+tuple 1st:
+1
+tuple size: 2
+tuple 1st:
+Hello world
+\end{codebox}
+
+这段略带实验性质的代码表明，你可以按值（按引用也可以）捕获可变参数包，随后该参数包会被“存储”进一个 tuple 对象。接着我们对该 tuple 调用一些辅助函数，以访问其数据与属性。
+
+你也可以使用 C++Insights 来查看编译器如何生成代码，并将模板、参数包和 Lambda 表达式展开为代码。相关示例见 @C++Insight\footnote{⁹感谢 Tomek Kamiński 找到了正确的链接！}⁷。
+
+
+请参见 C++14 章，其中可以捕获仅可移动类型；也可参考 C++20 章中关于可变参数包的改进。
+
+\section{返回类型}
+
+在大多数情况下，即便在 C++11 中，你也可以省略 Lambda 的返回类型，编译器会为你推导类型名。
+
+顺便提一句：最初，返回类型推导仅限于函数体只包含一条 return 语句的 Lambda。不过，这一限制很快就被取消了，因为实现更方便的版本并不存在什么问题。参见 C++ Standard Core Language Defect Reports and Accepted Issues\footnote{感谢 Tomek Kamiński 找到了正确的链接！}。
+
+总而言之，自 C++11 起，只要你的所有 return 语句类型相同，编译器就能推导出返回类型。
+
+从这份缺陷报告中，我们可以读到如下内容\footnote{感谢 Tomek Kamiński 找到了正确的链接！}：
+
+如果一个 Lambda 表达式不包含尾置返回类型，就相当于该尾置返回类型表示如下类型：
+
+\begin{itemize}
+\item 如果复合语句中没有 return 语句，或者所有 return 语句返回的要么是 void 类型的表达式、要么没有表达式、要么是 braced-init-list，则为 \texttt{void} 类型；
+\item 否则，如果所有 return 语句都返回表达式，且经过左值到右值转换（7.3.2 [conv.lval]）、数组到指针转换（7.3.3 [conv.array]）和函数到指针转换（7.3.4 [conv.func]）之后，所返回表达式的类型相同，则为该公共类型；
+\item 否则，程序非良构（ill-formed）。
+\end{itemize}
+
+\begin{codeboxt}{代码清单 2.13 返回类型推导（在线代码见 @Wandbox）}
+#include <type_traits>
+int main() {
+const auto baz = [](int x) noexcept {
+if (x < 20)
+return x * 1.1;
+else
+return x * 2.1;
+};
+static_assert(std::is_same<double, decltype(baz(10))>::value,
+"has to be the same!");
+}
+\end{codeboxt}
+
+在上述 Lambda 中，我们有两条 \texttt{return} 语句，但它们都指向 \texttt{double}，因此编译器可以推导出该类型。
+
+
+在 C++14 中，Lambda 的返回类型会更新，以适应普通函数的 \texttt{auto} 类型推导规则。参见第 52 页的“Return Type Deduction”。这样会得到简单得多的定义。
+
+\subsection{尾置返回类型语法}
+
+如果你想显式指定返回类型，可以使用尾置返回类型说明。例如，当你返回一个字符串字面量时：
+
+\begin{codeboxt}{代码清单 2.14 从 Lambda 返回字符串字面量（在线代码见 @Wandbox）}
+#include <iostream>
+#include <string>
+int main() {
+const auto testSpeedString = [](int speed) noexcept {
+if (speed > 100)
+return "you're a super fast";
+return "you're a regular";
+};
+auto str = testSpeedString(100);
+str += " driver";
+// 糟糕！const char* 上没有 += 运算符！
+std::cout << str;
+return 0;
+}
+\end{codeboxt}
+
+上述代码无法编译，因为编译器把 \texttt{const char*} 推导为 Lambda 的返回类型。这是因为字符串字面量上没有可用的 \texttt{+=} 运算符，所以代码会出错。
+
+我们可以通过把返回类型显式设为 \texttt{std::string} 来修复这个问题：
+
+\begin{codebox}
+auto testSpeedString = [](int speed) -> std::string {
+if (speed > 100)
+return "you're a super fast";
+return "you're a regular";
+};
+auto str = testSpeedString(100);
+str += " driver"; // 正常工作
+\end{codebox}
+
+你可以在 @Coliru 上试用这段代码\footnote{\url{http://coliru.stacked-crooked.com/a/45cebc8b35d5b2a9}}。
+
+请注意，我们现在必须去掉 \texttt{noexcept}，因为 \texttt{std::string} 的创建可能会抛出异常。
+
+顺便提一句，你也可以使用 \texttt{namespace std::string\_literals;}，然后返回 \texttt{"you're a regular"s} 来表示 \texttt{std::string} 类型。
+
+\section{转换为函数指针}
+
+如果你的 Lambda 没有捕获任何变量，那么编译器就可以把它转换为一个普通的函数指针。请参见标准 expr.prim.lambda\#6\footnote{\url{https://timsong-cpp.github.io/cppwp/n3337/expr.prim.lambda\#6}} 中的如下描述：
+
+对于不带 lambda-capture 的 lambda-expression，其闭包类型具有一个公开的、非虚的、非显式的 \texttt{const} 转换函数，可转换为指针到函数，该函数的形参和返回类型与闭包类型的函数调用运算符相同。该转换函数返回的值应为某个函数的地址，调用该函数时，其效果与调用闭包类型的函数调用运算符相同。
+
+为了说明 Lambda 如何支持这种转换，我们来看下面的例子。它定义了一个函数对象 \texttt{baz}，其中显式定义了转换运算符：
+
+\begin{codeboxt}{代码清单 2.15 转换为函数指针（在线代码见 @Wandboxline-numbers=on）}
+#include <iostream>
+void callWith10(void(* bar)(int)) { bar(10); }
+int main() {
+struct {
+using f_ptr = void(*)(int);
+void operator()(int s) const { return call(s); }
+operator f_ptr() const { return &call; }
+private:
+static void call(int s) { std::cout << s << '\n'; };
+} baz;
+callWith10(baz);
+callWith10([](int x) { std::cout << x << '\n'; });
+}
+\end{codeboxt}
+
+在上面的程序中，有一个函数 \texttt{callWith10} 接受一个函数指针。然后我们用两个实参调用它（第 18 行和第 19 行）：第一个使用 \texttt{baz}，它是一个包含了必要转换运算符的函数对象类型——它转换为 \texttt{f\_ptr}，与 \texttt{callWith10} 的形参类型相同。随后，我们用一个 Lambda 调用它。在这种情况下，编译器在底层执行所需的转换。
+
+当你需要调用某个需要回调函数的 C 风格函数时，这种转换可能会很方便。例如，下面有一段代码调用 C 标准库中的 \texttt{std::qsort}，并使用 Lambda 以逆序对元素排序：
+
+\begin{codeboxt}{代码清单 2.16 调用 C 风格函数（在线代码见 @Wandbox）}
+#include <cstdlib>
+#include <iostream>
+int main () {
+int values[] = { 8, 9, 2, 5, 1, 4, 7, 3, 6 };
+constexpr size_t numElements = sizeof(values)/sizeof(values[0]);
+std::qsort(values, numElements, sizeof(int),
+[](const void* a, const void* b) noexcept {
+return ( *(int*)b - *(int*)a );
+}
+);
+for (const auto& val : values)
+std::cout << val << ", ";
+}
+\end{codeboxt}
+
+如你所见，这段代码使用了 \texttt{std::qsort}，它只接受函数指针作为比较器。编译器可以对我们传入的无状态 Lambda 进行隐式转换。
+
+\subsection{一个棘手的情形}
+
+在我们转入下一个主题之前，还有一个值得分析的例子：
+
+\begin{codeboxt}{代码清单 2.17 加号与 Lambda（在线代码见 @Wandbox）}
+#include <type_traits>
+int main() {
+auto funcPtr = +[]{};
+static_assert(std::is_same<decltype(funcPtr), void (*)()>::value);
+}
+\end{codeboxt}
+
+请注意这个带 \texttt{+} 的奇怪语法。如果你去掉加号，那么 \texttt{static\_assert} 就会失败。这是为什么呢？
+
+要理解它的工作原理，我们可以查看 C++ Insights 项目生成的输出。参见如下可运行的例子\footnote{\url{https://cppinsights.io/s/0ee4cd81}}\footnote{\url{https://cppinsights.io/s/0ee4cd81}}：
+
+\begin{codebox}
+using FuncPtr_4 = void (*)();
+FuncPtr_4 funcPtr =
++static_cast<void (*)()>(__la.operator __la::retType_4_18());
+/* 通过：static_assert(std::integral_constant<bool, 1>::value); */
+// __la 在 cppinsights 中是 __lambda_4_18
+\end{codebox}
+
+这段代码使用了 \texttt{+}，它是一个一元运算符。该运算符可以作用于指针，因此编译器会把我们的无状态 Lambda 转换为函数指针，然后赋值给 \texttt{funcPtr}。另一方面，如果你去掉加号，那么 \texttt{funcPtr} 就只是一个普通的闭包对象，这就是 \texttt{static\_assert} 失败的原因。
+
+虽然写出这种带 \texttt{+} 的语法大概不是个好主意，但如果你使用 \texttt{static\_cast}，效果是相同的。当你不希望编译器生成过多的函数实例化时，可以运用这一技巧。例如：
+
+\begin{codeboxt}{代码清单 2.18 转换为函数指针（在线代码见 @Cpp Insights）}
+template<typename F>
+void call_function(F f) {
+f(10);
+}
+int main() {
+call_function(static_cast<int (*)(int)>([](int x){
+return x + 2; }));
+call_function(static_cast<int (*)(int)>([](int x){
+return x * 2; }));
+}
+\end{codeboxt}
+
+在上面的例子中，编译器只需为 \texttt{call\_function} 创建一个实例化，因为它只接受一个函数指针 \texttt{int (*)(int)}。但如果你去掉 \texttt{static\_cast}，就会得到两个版本的 \texttt{call\_function}，因为编译器必须为 Lambda 创建两个独立的类型。
+
+\section{IIFE —— 立即调用的函数表达式}
+
+在你迄今看到的大多数例子中，你可能会注意到，我都是先定义一个 Lambda，然后再调用它。
+
+不过，你也可以立即调用一个 Lambda：
+
+\begin{codeboxt}{代码清单 2.19 立即调用 Lambda（在线代码见 @Wandbox）}
+#include <iostream>
+int main() {
+int x = 1, y = 1;
+[&]() noexcept { ++x; ++y; }(); // <-- 调用 ()
+std::cout << x << ", " << y;
+}
+\end{codeboxt}
+
+如上所示，该 Lambda 被创建后并未赋值给任何闭包对象，而是直接用 \texttt{()} 调用。如果运行程序，你会看到输出为 \texttt{2, 2}。
+
+当你需要复杂地初始化一个 \texttt{const} 对象时，这种表达式可能会很有用。
+
+\begin{codebox}
+const auto val = []() {
+/* 若干行代码…… */
+}(); // 调用它！
+\end{codebox}
+
+上面，\texttt{val} 是由 Lambda 表达式返回的类型所对应的常量值，即：
+
+\begin{codebox}
+// val1 是 int
+const auto val1 = []() { return 10; }();
+// val2 是 std::string
+const auto val2 = []() -> std::string { return "ABC"; }();
+\end{codebox}
+
+下面是一个更长的例子，我们在其中使用 IIFE 作为辅助 Lambda，在函数内部创建一个常量值：
+
+\begin{codeboxt}{代码清单 2.20 IIFE 与 HTML 生成（在线代码见 @Wandbox）}
+#include <iostream>
+#include <string>
+void ValidateHTML(const std::string&) { }
+std::string BuildAHref(const std::string& link, const std::string& text) {
+const std::string html = [&link, &text] {
+const auto& inText = text.empty() ? link : text;
+return "<a href=\"" + link + "\">" + inText + "</a>";
+}(); // 调用！
+ValidateHTML(html);
+return html;
+}
+int main() {
+try {
+const auto ahref = BuildAHref("www.leanpub.com", "Leanpub Store");
+std::cout << ahref;
+}
+catch (...) {
+std::cout << "bad format...";
+}
+}
+\end{codeboxt}
+
+上面的例子包含一个函数 \texttt{BuildAHref}，它接受两个参数，然后构建一个 \texttt{<a> </a>} HTML 标签。根据输入参数，我们构建 \texttt{html} 变量。如果 \texttt{text} 不为空，我们就用它作为内部的 HTML 值；否则，我们使用 \texttt{link}。我们希望 \texttt{html} 变量是 \texttt{const} 的，但在输入参数上加上所需条件后，很难写出紧凑的代码。多亏了 IIFE，我们可以写一个独立的 Lambda，然后用 \texttt{const} 标记我们的变量。之后，该变量可以被传给 \texttt{ValidateHTML}。
+
+\subsection{关于可读性的一点说明}
+
+有时，使用一个被立即调用的 Lambda 可能会引发一些可读性问题。
+
+例如：
+
+\begin{codebox}
+const auto EnableErrorReporting = [&]() {
+if (HighLevelWarningEnabled())
+return true;
+if (MidLevelWarningEnabled())
+return UsersWantReporting(); // 取决于用户设置……
+return false;
+}();
+if (EnableErrorReporting) {
+// ...
+}
+\end{codebox}
+
+在上面的例子中，Lambda 代码相当复杂，阅读代码的开发者不仅要弄清楚这个 Lambda 是被立即调用的，还得推敲 \texttt{EnableErrorReporting} 的类型。他们可能会以为 \texttt{EnableErrorReporting} 是闭包对象，而不只是一个 \texttt{const} 变量。对于这种情况，你或许可以考虑不使用 \texttt{auto}，这样我们就能轻易看出类型。甚至可以在 \texttt{\}()} 旁边加一条注释，比如 \texttt{// call it now}。
+
+
+更多关于 IIFE 的内容：你或许想阅读关于 C++17 变更的章节，从 87 页开始查看升级版的 IIFE。
+
+\section{从 Lambda 派生}
+
+看到这一点你也许会感到惊讶，但你确实可以从 Lambda 派生！由于编译器会把 Lambda 表达式展开为一个带有 \texttt{operator()} 的函数对象，因此我们就能从该类型派生。
+
+来看一下基础代码：
+
+\begin{codeboxt}{代码清单 2.21 从单个 Lambda 派生（在线代码见 @Wandbox）}
+#include <iostream>
+template<typename Callable>
+class ComplexFn : public Callable {
+public:
+explicit ComplexFn(Callable f) : Callable(f) {}
+};
+template<typename Callable>
+ComplexFn<Callable> MakeComplexFunctionObject(Callable&& cal) {
+return ComplexFn<Callable>(std::forward<Callable>(cal));
+}
+int main() {
+const auto func = MakeComplexFunctionObject([]() {
+std::cout << "Hello Complex Function Object!";
+});
+func();
+}
+\end{codeboxt}
+
+在这个例子中，有一个 \texttt{ComplexFn} 类，它从 \texttt{Callable} 派生，而 \texttt{Callable} 是一个模板形参。如果我们想从一个 Lambda 派生，需要耍点小技巧，因为我们无法拼写出闭包类型的确切类型（除非把它包装进 \texttt{std::function}）。这就是为什么我们需要 \texttt{MakeComplexFunctionObject} 函数，它可以执行模板实参推导，从而获取 Lambda 闭包的类型。
+
+\texttt{ComplexFn} 除了名字以外，只是一个没什么用处的简单包装器。这种代码模式有什么实际用途吗？
+
+例如，我们可以扩展上面的代码，从两个 Lambda 派生，并创建一个重载集合：
+
+\begin{codeboxt}{代码清单 2.22 从两个 Lambda 派生（在线代码见 @Wandbox）}
+#include <iostream>
+template<typename TCall, typename UCall>
+class SimpleOverloaded : public TCall, UCall {
+public:
+SimpleOverloaded(TCall tf, UCall uf) : TCall(tf), UCall(uf) {}
+using TCall::operator();
+using UCall::operator();
+};
+template<typename TCall, typename UCall>
+SimpleOverloaded<TCall, UCall> MakeOverloaded(TCall&& tf, UCall&& uf) {
+return SimpleOverloaded<TCall, UCall>(std::forward<TCall> tf,
+std::forward<UCall> uf);
+}
+int main() {
+const auto func = MakeOverloaded(
+[](int) { std::cout << "Int!\n"; },
+[](float) { std::cout << "Float!\n"; }
+);
+func(10);
+func(10.0f);
+}
+\end{codeboxt}
+
+这一次代码稍微多一些：我们从两个模板形参派生，但还需要显式地暴露它们的调用运算符。为什么会这样？因为当编译器寻找正确的函数重载时，要求候选者处于同一作用域。
+
+为了理解这一点，我们来写一个从两个基类派生的简单类型。这个例子还注释掉了两条 \texttt{using} 声明：
+
+\begin{codeboxt}{代码清单 2.23 从两个类派生（出错）（在线代码见 @Wandbox）}
+#include <iostream>
+struct BaseInt {
+void Func(int) { std::cout << "BaseInt...\n"; }
+};
+struct BaseDouble {
+void Func(double) { std::cout << "BaseDouble...\n"; }
+};
+struct Derived : public BaseInt, BaseDouble {
+//using BaseInt::Func;
+//using BaseDouble::Func;
+};
+int main() {
+Derived d;
+d.Func(10.0);
+}
+\end{codeboxt}
+
+我们有两个实现了 \texttt{Func} 的基类。我们想从派生对象调用该方法。
+
+GCC 报告如下错误：
+
+\begin{codebox}
+error: request for member 'Func' is ambiguous
+\end{codebox}
+
+因为我们注释掉了 \texttt{using} 声明，\texttt{::Func()} 可能来自 \texttt{BaseInt} 或 \texttt{BaseDouble} 的作用域。编译器要在两个作用域中搜索最佳候选，而根据标准，这是不允许的。
+
+好了，让我们回到主要的用例：\texttt{SimpleOverloaded} 是一个基础类，还没达到可用于生产环境的标准。请阅读 C++17 章节，我们将在那里讨论这个模式的高级版本。多亏了若干 C++17 特性，我们将能够从多个 Lambda 派生（借助可变参数模板），并使用更紧凑的语法！
+
+\section{Storing Lambdas in a Container 在容器中存储 Lambda 表达式}
+
+作为本章的最后一项技术，我们来看看在容器中存储闭包的问题。
+
+但我之前不是写过，Lambda 表达式不能默认构造和赋值吗？
+
+是的……不过，我们在这里可以耍些花招。
+
+其中一种技术是借助无状态 Lambda 会转换为函数指针这一特性。虽然你不能直接存储闭包对象，但可以把由 Lambda 表达式转换而来的函数指针保存起来。
+
+例如：
+
+\begin{codeboxt}{代码清单 2.24 将 Lambda 存储为函数指针（在线代码见 @Wandbox）}
+#include <iostream>
+#include <vector>
+int main() {
+using TFunc = void (*)(int&);
+std::vector<TFunc> ptrFuncVec;
+ptrFuncVec.push_back([](int& x) { std::cout << x << '\n'; });
+ptrFuncVec.push_back([](int& x) { x *= 2; });
+ptrFuncVec.push_back(ptrFuncVec[0]); // print it again;
+int x = 10;
+for (const auto &entry : ptrFuncVec)
+entry(x);
+}
+\end{codeboxt}
+
+在上面的例子中，我们创建了一个由函数指针组成的 \texttt{vector}，它们会作用于该变量。容器中有三个元素：
+
+\begin{itemize}
+\item 第一个打印输入参数的值。
+\item 第二个修改该值。
+\item 第三个是第一个的副本，因此也会打印该值。
+\end{itemize}
+
+这个方案可行，但它仅限于无状态的 Lambda 表达式。如果我们想解除这个限制呢？
+
+为了解决这个问题，我们可以搬出那个笨重的帮手：\texttt{std::function}。为了让这个例子更有趣，它也从简单的整数切换为处理 \texttt{std::string} 对象的 Lambda 表达式：
+
+\begin{codeboxt}{代码清单 2.25 将 Lambda 存储为 std::function（在线代码见 @Wandbox）}
+#include <algorithm>
+#include <functional>
+#include <iostream>
+#include <vector>
+int main() {
+std::vector<std::function<std::string(const std::string&)>> vecFilters;
+size_t removedSpaceCounter = 0;
+const auto removeSpaces = [&removedSpaceCounter](const std::string& str) {
+std::string tmp;
+std::copy_if(str.begin(), str.end(), std::back_inserter(tmp),
+[](char ch) {return !isspace(ch); });
+removedSpaceCounter += str.length() - tmp.length();
+return tmp;
+};
+const auto makeUpperCase = [](const std::string& str) {
+std::string tmp = str;
+std::transform(tmp.begin(), tmp.end(), tmp.begin(),
+[](unsigned char c){ return std::toupper(c); });
+return tmp;
+};
+vecFilters.emplace_back(removeSpaces);
+vecFilters.emplace_back([](const std::string& x) {
+return x + " Amazing"; });
+vecFilters.emplace_back([](const std::string& x) {
+return x + " Modern"; });
+vecFilters.emplace_back([](const std::string& x) {
+return x + " C++"; });
+vecFilters.emplace_back([](const std::string& x) {
+return x + " World!"; });
+vecFilters.emplace_back(makeUpperCase);
+const std::string str = "
+H e l l o
+";
+auto temp = str;
+for (const auto &entryFunc : vecFilters)
+temp = entryFunc(temp);
+std::cout << temp;
+std::cout <<"\nremoved spaces: " << removedSpaceCounter << '\n';
+}
+\end{codeboxt}
+
+输出如下：
+
+\begin{codebox}
+HELLO AMAZING MODERN C++ WORLD!
+removed spaces: 12
+\end{codebox}
+
+这一次我们在容器中存储了 \texttt{std::function<std::string(const std::string\&)>}。这让我们可以使用任意种类的函数对象，包括带有被捕获变量的 Lambda 表达式。其中一个 Lambda 表达式 \texttt{removeSpacesCnt} 捕获了一个变量，用来保存有关从输入字符串中删除空格的信息。
+
+\section{Summary 小结}
+
+在本章中，你学习了如何创建和使用 Lambda 表达式。我描述了语法、捕获子句、Lambda 的类型，并且覆盖了大量示例和用例。我们甚至还更进一步，向你展示了一种从 Lambda 派生或在容器中存储它的模式。
+
+但这还不是全部！
+
+Lambda 表达式已经成为现代 C++ 的重要组成部分。随着用例的增多，开发者也看到了改进这一特性的可能。正因如此，你现在可以进入下一章，看看 ISO 委员会在 C++14 中加入的关键更新。

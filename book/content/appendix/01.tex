@@ -1,0 +1,40 @@
+下面是本书通篇使用过的技术与模式的清单：
+
+\subsection{C++11 章}
+
+\begin{itemize}
+\item 计算调用次数——一种通过插桩默认函数对象来收集额外信息的示例。自第 27 页起。
+\item 从 Lambda 派生——一种允许你包装闭包类型并用附加功能扩展它的基本技术。自第 45 页起。
+\item IIFE（立即调用的函数表达式，Immediately Invoked Function Expression）——一种在不创建额外函数的情况下，计算一个需要复杂初始化的 \texttt{const} 变量的高效方式。自第 42 页起。
+\item 将无捕获 Lambda 作为函数指针传递给 C 风格 API 函数。自第 39 页起。
+\item 如何在容器中存储 Lambda——我们可以耍点小技巧，把包装进 \texttt{std::function} 的 Lambda 存储起来。自第 49 页起。
+\end{itemize}
+
+\subsection{C++14 章}
+
+\begin{itemize}
+\item 替换 \texttt{std::bind1st}、\texttt{std::bind2nd}——如何使用现代 C++ 来替换已弃用的功能。见第 67 页。
+\item 借助初始化捕获带来的优化——一个存储用于 Lambda 主体的临时值的示例。自第 58 页起。
+\item 泛型 Lambda 的完美转发——如何在泛型实参上使用 \texttt{std::forward}，以便沿着调用栈进一步传递实参。自第 63 页起。
+\item LIFTING 与 Lambda——这允许将一组函数重载传入接受可调用对象的函数模板。例如，当你调用标准库中的算法时。自第 70 页起。
+\item 递归 Lambda——你可在 Lambda 主体内部调用闭包对象所使用的一些技巧。自第 73 页起。
+\item 可变参数泛型 Lambda——如何在 Lambda 表达式中使用可变参数。自第 62 页起。
+\end{itemize}
+
+\subsection{C++17 章}
+
+\begin{itemize}
+\item 重载模式——一种允许从多个 Lambda 表达式派生并将其传给 \texttt{std::visit} 的机制。自第 93 页起。
+\item IIFE 的改进——如何使用 \texttt{std::invoke} 提升可读性。自第 87 页起。
+\item 用 IIFE 提取函数——一个有趣的练习：你可以用 IIFE 包裹代码，随后逐步把它转换成独立的更小的函数。自第 88 页起。
+\item 可变参数泛型 Lambda 的更新——借助折叠表达式简化代码。自第 91 页起。
+\item Lambda 与异步执行——将 Lambda 用于线程、\texttt{async} 与并行算法时有哪些陷阱。自第 99 页起。
+\end{itemize}
+
+\subsection{C++20 章}
+
+\begin{itemize}
+\item 重载模式的更新——借助扩展的类模板推导指引进一步简化。自第 124 页起。
+\item 参数包捕获的更新——对右值引用更好的支持。自第 113 页起。
+\item Lambda 与 \texttt{constexpr} 算法——C++20 带来了大量 \texttt{constexpr} 标准库算法，而借助 \texttt{constexpr} Lambda，你可以写出简短的代码。自第 123 页起。
+\end{itemize}

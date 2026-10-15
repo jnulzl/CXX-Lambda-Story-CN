@@ -1,0 +1,13 @@
+% =============================================================================
+%  封面（Cover）—— 使用英文原版封面图片
+%  · 原书 PDF 第 1 页渲染为 images/cover_original.png
+%  · 保持原图比例，按页面高度缩放并居中，不拉伸、不裁切
+% =============================================================================
+\thispagestyle{empty}
+
+\begin{tikzpicture}[remember picture, overlay]
+  \node[anchor=center, inner sep=0pt] at (current page.center)
+    {\includegraphics[height=\paperheight, keepaspectratio]{images/cover_original.png}};
+\end{tikzpicture}
+
+\clearpage

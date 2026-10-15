@@ -1,0 +1,27 @@
+% book/index.tex —— 封面、目录与全书章节索引
+% 调整章节顺序：直接移动下面的行即可
+
+\myFrontNoToc{content/front/00-title}
+
+\newpage
+\thispagestyle{empty}
+\tableofcontents
+\newpage
+
+\myFront{关于本书}{content/front/00-about}
+\myFront{关于作者}{content/front/01-author}
+\myFront{致谢}{content/front/02-ack}
+\myFront{修订历史}{content/front/03-rev}
+
+\myChapter{1}{C++98/03 中的 Lambda 表达式}{content/main/01}
+\myChapter{2}{C++11 中的 Lambda 表达式}{content/main/02}
+\myChapter{3}{C++14 中的 Lambda 表达式}{content/main/03}
+\myChapter{4}{C++17 中的 Lambda 表达式}{content/main/04}
+\myChapter{5}{C++20 中的 Lambda 表达式}{content/main/05}
+
+\appendix
+\myAppendix{1}{技术清单}{content/appendix/01}
+\myAppendix{2}{C++ Lambda 表达式的六大优势}{content/appendix/02}
+
+\myFront{参考文献}{content/back/02-references}
+\myFront{索引}{content/back/03-index}

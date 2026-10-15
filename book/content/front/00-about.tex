@@ -1,0 +1,172 @@
+本书讲述了 C++ 中 Lambda（表达式）的发展历程。你将循序渐进地学习如何使用这一强大特性，逐步消化随 C++ 标准每一次修订而引入的新能力与增强项。
+
+我们将从 C++98/03 开始，然后逐步迈向最新的 C++ 标准。
+
+\begin{itemize}
+\item C++98/03——如何在没有 Lambda 支持的情况下编写代码。这一现代 C++ 特性诞生的动机是什么？
+\item C++11——早期阶段。你将了解 Lambda 表达式的各个组成要素，甚至一些技巧。这是篇幅最长的一章，因为我们需要涵盖大量内容。
+\item C++14——更新。Lambda 被采纳之后，我们看到了一些改进它们的选项。
+\item C++17——更多改进，尤其是处理 \texttt{this} 指针，并允许 \texttt{constexpr}。
+\item C++20——在本节中，我们将了解最新且非常新鲜的 C++20 标准。
+\end{itemize}
+
+此外，你会在各章中发现大量在代码中运用 Lambda 的实用技巧与模式。
+
+通览这一强大 C++ 特性的演进，不仅能让我们学会 Lambda，也能让我们看到 C++ 近年来发生了怎样的变化。在某个小节中你会看到一种技巧，当新的 C++ 要素可用时，它会在后续章节中被“迭代”并更新。在可行的情况下，本书会交叉链接到书中其他相关小节。
+
+\section{成书渊源}
+
+本书内容的想法，始于 Tomasz Kamiński 在我们本地的克拉科夫 C++ 用户组所做的一场现场编程演示。
+
+我借鉴了那场演示中的想法（当然，事先征得了 Tomek 的许可 :)，随后撰写了两篇文章，发表于 bfilipek.com：
+
+\begin{itemize}
+\item Lambdas: From C++11 to C++20, Part 1\footnote{\url{https://www.bfilipek.com/2019/02/lambdas-story-part1.html}}
+\item Lambdas: From C++11 to C++20, Part 2\footnote{\url{https://www.bfilipek.com/2019/03/lambdas-story-part2.html}}
+\end{itemize}
+
+后来，我决定不仅要为读者提供博客文章，还要奉上一本排版精良的 PDF。Leanpub 提供了一种简便的方式来制作此类 PDF，因此将文章内容复制并整理成一本 Leanpub 图书是顺理成章的选择。
+
+为何不再进一步？
+
+一段时间后，我决定撰写更多内容，更新示例，并提供更完善的用例与模式。于是便有了你手中的这本书！如今它的篇幅几乎是博客上最初可用材料的四倍！
+
+\section{本书目标读者}
+
+本书面向所有希望全面了解现代 C++ 特性——Lambda（表达式）——的 C++ 开发者。
+
+\section{如何阅读本书}
+
+本书按“历史”顺序编排，也就是说，你会先了解 Lambda 背后的背景，然后随新特性与新能力缓缓推进。对于想要回顾原理、了解幕后故事并掌握各个 C++ 标准中新增内容的资深开发者而言，从头到尾通读本书或许正合适。
+
+另一方面，如果你是初学者，最好从 C++11 这一章开始。先看看关于基本语法、示例以及如何捕获变量的小节。然后，当你准备就绪，可以跳过一些高级主题，进入 C++14 章，在那里你将学习泛型 Lambda。C++11 与 C++14 章的前面部分对于理解 Lambda 至关重要。一旦掌握了基础，你便可以回读那些被跳过的小节，了解更高级的技巧。
+
+在书末的附录 A 中，有一份实用的“Lambda 技巧”清单。你可以快速浏览，看看是否有感兴趣的内容，然后再开始阅读对应小节。
+
+\section{读者反馈与勘误}
+
+如果你发现任何应当纠正的错误、笔误、语法问题，或其他疏漏（尤其是逻辑问题！），请将反馈发送至 bartlomiej.filipek AT bfilipek.com。
+
+以下是勘误列表及修复记录：
+
+\url{https://www.cppstories.com/p/cpplambda/}
+
+你的反馈至关重要！如果你写下诚恳的评价，将有助于本书的推广，也能提升我后续作品的质量。
+
+如果你通过 Amazon 购买了本书——无论是纸质版还是 Kindle 版——请在那里留下评价。
+
+此外，本书在 GoodReads 上也有专属页面。欢迎分享你的反馈：C++ Lambda Story @GoodReads\footnote{\url{https://www.goodreads.com/book/show/53609731-c-lambda-story}}
+
+\section{示例代码}
+
+你可以在这个独立的 Github 公开代码仓库中找到所有示例的源代码。
+
+\url{github.com/fenbf/cpplambdastory-code}\footnote{\url{https://github.com/fenbf/cpplambdastory-code}}
+
+你可以浏览单个文件，或下载整个分支：
+
+\url{github.com/fenbf/cpplambdastory-code/archive/main.zip}\footnote{\url{https://github.com/fenbf/cpplambdastory-code/archive/main.zip}}
+
+每一章都有自己的文件夹，例如，“Lambdas in C++11”对应的代码位于“cpp11”中。
+
+每个示例的标题中都带有一个编号。例如：
+
+\begin{codeboxt}{代码清单 2.3 std::function 与 auto 类型推导……}
+// 示例代码……
+\end{codeboxt}
+
+这意味着你可以进入第二章的文件夹——C++11，然后找到第三个示例。它的文件名如下：
+
+\begin{codebox}
+chapter2_cpp11\ex2_3_std_function_and auto.cpp.
+\end{codebox}
+
+书中的许多示例都相对简短。你可以将各行代码复制粘贴到你常用的编译器/IDE 中，然后运行这段代码片段。
+
+\section{代码许可协议}
+
+本书的代码采用知识共享（Creative Commons）许可协议发布。
+
+\section{排版与特殊栏目}
+
+本书的代码示例以等宽字体呈现，类似于下面的例子：
+
+对于较长的示例：
+
+示例标题
+
+\begin{codebox}
+#include <iostream>
+int main() {
+const std::string text { "Hello World" }
+std::cout << text << '\n';
+}
+\end{codebox}
+
+或者更短的代码片段（不带标题，有时也不带 \texttt{include} 语句）：
+
+\begin{codebox}
+int foo() {
+return std::clamp(100, 1000, 1001);
+}
+\end{codebox}
+
+在条件允许时，你还会看到指向在线编译器的链接，可以在其中试验这些代码。例如：
+
+\begin{codeboxt}{示例标题。在线代码见 @Wandbox}
+#include <iostream>
+int main() {
+std::cout << "Hello World!";
+}
+\end{codeboxt}
+
+你可以点击标题中的链接，它应该会打开对应在线编译器的网站（上例中即 Wandbox）。你可以编译示例、查看输出，并直接在浏览器中试验代码。
+
+较长程序的代码片段通常会被精简，只展示核心机制。
+
+\subsection{语法高亮的局限}
+
+本书当前版本在语法高亮方面可能会存在一些局限。例如：
+
+\begin{itemize}
+\item \texttt{if constexpr} - 链接到 Pygments 问题：C++ if constexpr 未被识别（C++17）· Issue \#1136\footnote{\url{https://github.com/pygments/pygments/issues/1136}}.
+\item 类的第一个方法不会被高亮——C++ 中类的第一个方法未被高亮 · Issue \#791\footnote{\url{https://github.com/pygments/pygments/issues/791}}.
+\item 模板方法不会被高亮——C++ 词法分析器在返回类型为模板时无法识别函数 · Issue \#1138\footnote{\url{https://github.com/pygments/pygments/issues/1138}}.
+\item 现代 C++ 属性有时无法被正确识别。
+\item C++ 与 Pygments 的其他问题：C++ Issues · github/pygments/pygments\footnote{\url{https://github.com/pygments/pygments/issues?q=is\%3Aissue+is\%3Aopen+C\%2B\%2B}}.
+\end{itemize}
+
+\subsection{特殊栏目}
+
+在本书中，你还会看到以下特殊栏目：
+
+\begin{myInfoBox}
+这是一个信息框，包含与当前小节相关的补充说明。
+\end{myInfoBox}
+
+\begin{myWarnBox}
+这是一个警告框，用于提示与特定主题相关的潜在风险和威胁。
+\end{myWarnBox}
+
+\begin{myQuote}
+这是一个引用框。在本书中，它常用于引用 C++ 标准。
+\end{myQuote}
+
+\section{在线编译器}
+
+除了创建本地项目来试验代码示例，你也可以借助在线编译器。它们提供基本的文本编辑器，通常只允许编译单个源文件（即你正在编辑的代码）。如果你想试验代码示例，并使用不同厂商与版本的编译器查看结果，它们会非常方便。
+
+例如，本书的许多代码示例都是使用 Coliru Online、Wandbox 或 Compiler Explorer 创建，随后再为本书做了调整。
+
+下面列出一些有用的服务：
+
+\begin{itemize}
+\item Coliru\footnote{\url{http://coliru.stacked-crooked.com/}}——使用 GCC 9.2.0（截至 2020 年 7 月），提供链接分享与基本文本编辑器，虽简单却非常高效。
+\item Wandbox\footnote{\url{https://wandbox.org/}}——提供大量编译器，涵盖绝大多数 Clang 与 GCC 版本，可使用 Boost 库；支持链接分享与多文件编译。
+\item Compiler Explorer\footnote{\url{https://gcc.godbolt.org/}}——提供众多编译器，可显示生成的汇编代码，能执行代码，甚至进行静态代码分析。
+\item CppBench\footnote{\url{http://quick-bench.com/}}——运行简单的 C++ 性能测试（使用 google benchmark 库）。
+\item BuildBench\footnote{\url{https://build-bench.com}}——可对比两个 C++ 程序的构建时间，界面与 CppBench 相似。
+\item C++ Insights\footnote{\url{https://cppinsights.io/}}——一个基于 Clang 的源码到源码转换工具。它通过展开 Lambda、auto、结构化绑定、模板推导，以及变参包或基于范围的 for 循环，来展示编译器眼中的代码。
+\end{itemize}
+
+此外，这个网站上汇总了一份实用的在线编译器清单：List of Online C++ Compilers\footnote{\url{https://arnemertz.github.io/online-compilers/}}

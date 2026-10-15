@@ -1,0 +1,280 @@
+作为开始，先为我们的主题铺垫一些背景是合适的。为此，我们将回顾过去，看看那些没有使用任何现代 C++ 技巧的代码——也就是 C++98/03 规范下的代码。
+
+在本章中，你将学到：
+
+\begin{itemize}
+\item 如何以“旧式”方式把函数对象传给标准库中的算法。
+\item 函数对象类类型的局限性。
+\item 为什么函数式辅助工具还不够好。
+\item 为 C++0x/C++11 引入 Lambda 表达式的动机。
+\end{itemize}
+
+\section{C++98/03 中的可调用对象}
+
+标准库的一个基本理念是：像 \texttt{std::sort}、\texttt{std::for\_each}、\texttt{std::transform} 这样的算法，以及许多其他算法，都能接受任何可调用对象，并对输入容器中的元素调用它。然而，在 C++98/03 中，这仅限于函数指针，或者带有调用运算符的类类型（通常被称为“functor”）。
+
+作为示例，我们来看看一个打印 \texttt{vector} 中所有元素的程序。在第一个版本中，我们将使用普通函数：
+
+\begin{codeboxt}{代码清单 1.1 一个基本的打印函数（在线代码见 @Wandbox）}
+#include <algorithm>
+#include <iostream>
+#include <vector>
+void PrintFunc(int x) {
+std::cout << x << '\n';
+}
+
+int main() {
+std::vector<int> v;
+v.push_back(1); // C++03 中没有统一的初始化！
+v.push_back(2); // 当时只有 push_back 可用…… :)
+std::for_each(v.begin(), v.end(), PrintFunc);
+}
+\end{codeboxt}
+
+上面的代码使用 \texttt{std::for\_each} 遍历一个 \texttt{vector}（我们用的是 C++98/03，因此基于范围的 for 循环不可用！），然后把 \texttt{PrintFunc} 作为一个可调用对象传入。
+
+我们可以把这个函数改成一个带有调用运算符的类类型：
+
+\begin{codeboxt}{代码清单 1.2 一个基本的打印函数对象类型（在线代码见 @Wandbox）}
+#include <algorithm>
+#include <iostream>
+#include <vector>
+struct Printer {
+void operator()(int x) const {
+std::cout << x << '\n';
+}
+};
+
+int main() {
+std::vector<int> v;
+v.push_back(1);
+v.push_back(2); // C++98/03 中没有初始化列表……
+std::for_each(v.begin(), v.end(), Printer());
+}
+\end{codeboxt}
+
+这个示例定义了一个带有 \texttt{operator()} 的 \texttt{struct}，这意味着你可以像调用普通函数一样“调用”这个对象：
+
+\begin{codebox}
+Printer printer;
+// 调用 operator()
+printer();
+printer.operator()(); // 等价的调用
+\end{codebox}
+
+虽然非成员函数通常是无状态的\footnote{你可以在普通函数中使用全局变量或静态变量，但这不是最佳方案。这种做法会让……}，但类类型的函数对象可以持有非静态数据成员，从而保存状态。一个例子是在算法中统计可调用对象的调用次数。这种方案需要维护一个计数器，并在每次调用时更新它：
+
+\begin{codeboxt}{代码清单 1.3 带有状态的函数对象（在线代码见 @Wandbox）}
+#include <algorithm>
+#include <iostream>
+#include <vector>
+struct PrinterEx {
+PrinterEx(): numCalls(0) { }
+void operator()(int x) {
+std::cout << x << '\n';
+++numCalls;
+}
+int numCalls;
+};
+
+int main() {
+std::vector<int> v;
+v.push_back(1);
+v.push_back(2);
+const PrinterEx vis = std::for_each(v.begin(), v.end(), PrinterEx());
+std::cout << "num calls: " << vis.numCalls << '\n';
+}
+\end{codeboxt}
+
+在上面的示例中，有一个数据成员 \texttt{numCalls} 用来统计调用运算符被调用的次数。\texttt{std::for\_each} 会返回我们传入的那个函数对象，因此之后我们可以拿到这个对象并读取其数据成员。
+
+正如你可以轻易预料的，我们应当得到如下输出：
+
+\begin{codebox}
+1
+2
+num calls: 2
+\end{codebox}
+
+我们也可以从调用作用域中“捕获”变量。为此，必须在函数对象中创建一个数据成员，并在构造函数中对其进行初始化。
+
+\begin{codeboxt}{代码清单 1.4 带有“被捕获”变量的函数对象（在线代码见 @Wandbox）}
+#include <algorithm>
+#include <iostream>
+#include <string>
+#include <vector>
+struct PrinterEx {
+PrintEx(const std::string& str):
+strText(str), numCalls(0) { }
+void operator()(int x) {
+std::cout << strText << x << '\n';
+++numCalls;
+}
+std::string strText;
+int numCalls;
+};
+
+int main() {
+std::vector<int> v;
+v.push_back(1);
+v.push_back(2);
+const std::string introText("Elem: ");
+const PrinterEx vis = std::for_each(v.begin(), v.end(),
+PrinterEx(introText));
+std::cout << "num calls: " << vis.numCalls << '\n';
+}
+\end{codeboxt}
+
+在这个版本中，\texttt{PrinterEx} 额外接受一个参数来初始化一个数据成员。随后这个变量在调用运算符中被使用，预期输出如下：
+
+\begin{codebox}
+Elem: 1
+Elem: 2
+num calls: 2
+\end{codebox}
+
+\subsection{什么是“Functor”？}
+
+在前面几节中我提到过，带有 \texttt{operator()} 的类类型有时被称为“functor”。虽然这个术语很方便，也比“函数对象类类型”短得多，但它并不准确。
+
+事实上，“Functor”一词源自函数式编程，它的含义与 C++ 中口语化的用法并不相同。
+
+引用 Bartosz Milewski 关于 Functor 的论述\footnote{\url{https://bartoszmilewski.com/2015/01/20/functors/}}：
+
+\begin{myQuote}
+函子（functor）是范畴之间的映射。给定两个范畴 C 和 D，函子 F 会把 C 中的对象映射到 D 中的对象——它本质上是一个作用在对象上的函数。
+\end{myQuote}
+
+这非常抽象，但幸运的是，我们也可以看看一些更简单的定义。在《C++ 中的函数式编程》\footnote{《C++ 中的函数式编程：如何用函数式技术改进你的 C++ 程序（第 1 版）》@Amazon} 一书的第 10 章中，Ivan Cukic 把这些抽象的定义“翻译”成了更贴近 C++ 的实用版本：
+
+如果一个类模板 \texttt{F} 上定义了 \texttt{transform}（或 \texttt{map}）函数，那么它就是一个 functor。此外，这样的 \texttt{transform} 函数必须满足关于恒等（identity）和组合（composition）的两条规则。
+
+“Functor”这一术语在 C++ 规范（即便是 C++98/03）中从未以任何形式出现，因此在本书的余下部分，我们会尽量避免使用它。
+
+如果你想进一步了解 Functor，我推荐以下资料：
+
+\begin{itemize}
+\item Functors、Applicatives 与 Monads 图解 - adit.io\footnote{\url{https://adit.io/posts/2013-04-17-functors,_applicatives,_and_monads_in_pictures.html}}
+\item Functors | Bartosz Milewski 的 Programming Cafe\footnote{\url{https://bartoszmilewski.com/2015/01/20/functors/}}
+\item 什么是 C++ 中的 functor 及其用途？- Stack Overflow\footnote{\url{https://stackoverflow.com/questions/356950/what-are-c-functors-and-their-uses}}
+\item Functor - 维基百科\footnote{\url{https://en.wikipedia.org/wiki/Functor}}
+\end{itemize}
+
+\section{函数对象类类型的问题}
+
+如你所见，创建带有调用运算符的类类型非常强大。你拥有完全的控制权，可以按自己喜欢的任何方式设计它们。然而，在 C++98/03 中，问题在于你必须在与算法调用不同的地方定义函数对象类型。这意味着这个可调用对象可能出现在源文件中往前或往后几十行甚至上百行的地方，甚至可能位于另一个编译单元中。
+
+作为一种可能的解决方案，你或许尝试过编写局部类（local class），因为 C++ 一直支持这种语法。但这在模板中行不通。
+
+看看下面这段代码：A Local Function Object Type
+
+\begin{codebox}
+int main() {
+struct LocalPrinter {
+void operator()(int x) const {
+std::cout << x << '\n';
+}
+};
+std::vector<int> v(10, 1);
+std::for_each(v.begin(), v.end(), LocalPrinter());
+}
+\end{codebox}
+
+试着用 \texttt{-std=c++98} 编译它，你会在 GCC 上看到如下错误：
+
+\begin{codebox}
+error: template argument for
+'template<class _IIter, class _Funct> _Funct
+std::for_each(_IIter, _IIter, _Funct)'
+uses local type 'main()::LocalPrinter'
+\end{codebox}
+
+事实上，在 C++98/03 中，你无法用局部类型去实例化模板。C++ 程序员很快就意识到了这些限制，并找到了绕过 C++98/03 问题的办法。其中一种方案就是准备一组辅助工具。我们下一节就来回顾它们。
+
+\section{用函数式辅助工具组合}
+
+如果有一些辅助工具和预定义的函数对象会怎样？如果你查看标准库中的 \texttt{<functional>} 头文件，会发现许多类型与函数，它们可以立即与标准算法一起使用。
+
+例如：
+
+\begin{itemize}
+\item \texttt{std::plus<T>()} - 接受两个参数并返回它们的和。
+\item \texttt{std::minus<T>()} - 接受两个参数并返回它们的差。
+\item \texttt{std::less<T>()} - 接受两个参数，若第一个小于第二个则返回真。
+\item \texttt{std::greater\_equal<T>()} - 接受两个参数，若第一个大于或等于第二个则返回真。
+\item \texttt{std::bind1st} - 创建一个可调用对象，其第一个实参固定为给定值。
+\item \texttt{std::bind2nd} - 创建一个可调用对象，其第二个实参固定为给定值。
+\item \texttt{std::mem\_fun} - 创建一个成员函数包装对象。
+\item 以及许多其他工具。
+\end{itemize}
+
+我们来写一段借助这些辅助工具的代码：
+
+\begin{codeboxt}{代码清单 1.5 使用旧式 C++98/03 函数式辅助工具（在线代码见 @Wandbox）}
+#include <algorithm>
+#include <functional>
+#include <vector>
+int main() {
+std::vector<int> v;
+v.push_back(1);
+v.push_back(2);
+// .. 持续 push_back 直至 9...
+const size_t smaller5 = std::count_if(v.begin(), v.end(),
+std::bind2nd(std::less<int>(), 5));
+return smaller5;
+}
+\end{codeboxt}
+
+这个示例使用了 \texttt{std::less}，并通过 \texttt{std::bind2nd} 固定了它的第二个实参。整个“组合”被传入 \texttt{count\_if}\footnote{bind1st、bind2nd 以及其他函数式辅助工具在 C++11 中已被弃用，并在 C++17 中移除。本章中的代码}。正如你大概能猜到的，这段代码展开后相当于一个执行简单比较的函数：
+
+\begin{codebox}
+return x < 5;
+\end{codebox}
+
+如果你想要更多开箱即用的辅助工具，也可以看看 Boost 库，例如 \texttt{boost::bind}。
+
+遗憾的是，这种方法的主要问题在于其复杂性与难以学习的语法。例如，编写组合两个或更多函数的代码并不自然。看看下面：
+
+\begin{codeboxt}{代码清单 1.6 组合函数式辅助工具（在线代码见 @Wandbox）}
+#include <algorithm>
+#include <functional>
+#include <vector>
+int main() {
+using std::placeholders::_1;
+std::vector<int> v;
+v.push_back(1);
+v.push_back(2);
+// 持续 push_back 直至 9...
+const size_t val = std::count_if(v.begin(), v.end(),
+std::bind(std::logical_and<bool>(),
+std::bind(std::greater<int>(),_1, 2),
+std::bind(std::less_equal<int>(),_1,6)));
+return val;
+}
+\end{codeboxt}
+
+这个组合使用了 \texttt{std::bind}（来自 C++11，所以这里我们稍微“作弊”了一下，它并非 C++98/03），并将 \texttt{std::greater} 与 \texttt{std::less\_equal} 通过 \texttt{std::logical\_and} 连接起来。此外，代码使用了 \texttt{\_1}，它是第一个输入实参的占位符。
+
+虽说上面的代码能够工作，而且你可以在局部定义它，但你大概也会认同：它既复杂又不自然。更别提这个组合仅仅表达了一个简单的条件：
+
+\begin{codebox}
+return x > 2 && x <= 6;
+\end{codebox}
+
+有没有更好、更直接易用的东西呢？
+
+\section{新特性的动机}
+
+如你所见，在 C++98/03 中，有若干种方式可以把可调用对象声明并传递给标准库中的算法与工具。然而，所有这些方案都有一些局限。例如，你无法声明局部函数对象类型，或者把函数与函数式辅助对象组合起来也非常麻烦。
+
+好在，C++11 终于带来了大量的改进！
+
+首先，C++ 委员会解除了使用局部类型实例化模板的限制。从 C++11 起，你可以在需要的地方局部地编写带有调用运算符的类类型。
+
+更重要的是，C++11 还实现了一个新想法：如果我们拥有一种简短的语法，然后由编译器把它“展开”成一个局部函数对象类型的定义，会怎样？
+
+而这，正是“Lambda 表达式”诞生的契机！
+
+如果我们查阅 N3337\footnote{\url{https://timsong-cpp.github.io/cppwp/n3337/}}（C++11 的最终草案），会发现其中有一个专门讲解 Lambda 的章节：\texttt{[expr.prim.lambda]}\footnote{\url{https://timsong-cpp.github.io/cppwp/n3337/expr.prim.lambda}}。
+
+我们下一章就来一探这个新特性。

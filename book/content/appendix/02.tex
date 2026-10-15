@@ -1,0 +1,233 @@
+我希望你享受了这本书，并从中学到了很多关于 Lambda 表达式的知识。这一强大的特性已成为现代 C++ 最显著的标志之一。Lambda 的演进也与语言本身的改进紧密相连，因此通过阅读本书，你也见识了许多很酷的 C++ 技巧，Lambda 在其中让事情变得更简单、更易读。
+
+作为全书的总结，让我们梳理一下所学知识，并列出 Lambda 的几项优势。
+
+\section{Lambda 让代码更具可读性}
+
+第一点听起来可能相当显而易见，但值得庆幸的是，自 C++11 以来，我们已经能够编写更紧凑的代码。例如，在关于 C++98/03 的章节中，我们曾尝试解读下面这段使用了绑定（bind）表达式以及标准库预定义辅助函数对象的代码：
+
+\begin{codeboxt}{代码清单 6.1 函数组合与 std::bind（在线代码见 @Compiler Explorer）}
+#include <algorithm>
+#include <functional>
+#include <vector>
+int main() {
+using std::placeholders::_1;
+const std::vector<int> v { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+const auto val = std::count_if(v.begin(), v.end(),
+std::bind(std::logical_and<bool>(),
+std::bind(std::greater<int>(),_1, 2),
+std::bind(std::less_equal<int>(),_1,6)));
+return val;
+}
+\end{codeboxt}
+
+你能立刻说出 \texttt{val} 的最终值是多少吗？
+
+现在让我们把它改写成 Lambda 表达式：
+
+\begin{codeboxt}{代码清单 6.2 借助 Lambda 获得更清爽的语法（在线代码见 @Compiler Explorer）}
+#include <algorithm>
+#include <vector>
+int main() {
+const std::vector<int> v { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+const auto val = std::count_if(v.begin(), v.end(),
+[](int v) noexcept { return v > 2 && v <= 6;});
+return val;
+}
+\end{codeboxt}
+
+这样不是好多了吗？
+
+我们不仅为这个匿名函数对象获得了更简短的语法，甚至还减少了一个包含语句（因为不再需要 \texttt{<functional>} 了）。在 C++98/03 中，使用预定义辅助工具来即时构建那些可调用对象是很方便的。它们顺手好用，甚至允许你组合功能以获得某些复杂的条件或操作。然而，主要问题在于其难以学习的语法。你当然仍可以使用它们，即便是在 C++17 或 C++20 的代码中（以及在无法使用 Lambda 的地方），但我想它们在复杂场景下的应用如今已有些受限。在大多数情况下，使用 Lambda 要容易得多。
+
+我打赌你能在自己的项目中举出许多例子，说明应用 Lambda 表达式让代码更整洁、更易读。
+
+\section{Lambda 的编译速度可比 std::bind 快 7 倍！}
+
+让我们看看下面这段代码：
+
+\begin{codebox}
+int sum3(int a, int b, int c) {
+return a + b + c;
+}
+int main() {
+int x = 10;
+auto sum2 = [x](int a, int b) { return sum3(x, a, b);};
+return sum2(10, 10);
+}
+\end{codebox}
+
+再看使用 \texttt{std::bind} 的第二个版本：
+
+\begin{codebox}
+#include <functional>
+int sum3(int a, int b, int c) {
+return a + b + c;
+}
+int main() {
+int x = 10;
+auto sum2 = std::bind(sum3, std::placeholders::_1,
+std::placeholders::_2, x);
+return sum2(10, 10);
+}
+\end{codebox}
+
+你知道哪个编译得更快吗？
+
+我们可以使用 build-bench（一个在线基准测试编译器）来比较速度，下面是我们的实验链接：lambdas 与 \texttt{std::bind} @BuildBench\footnote{\url{https://build-bench.com/b/S7L7U0jNHQpgifhcKq_ZMudZmow}}。
+
+结果如何？
+
+\myGraphic{0.8}{images/fig_p147_1.png}{编译时间}
+
+Lambda 的编译速度几乎比 \texttt{std::bind} 快 7 倍（使用的是 GCC 10.1、C++20 模式以及 -O3 优化级别）。
+
+\begin{tabular}{ll}
+\hline
+版本 & 编译归一化 CPU 时间 \\
+\hline
+使用 \texttt{std::bind} & 0.4955 \\
+使用 Lambda & 0.0685 \\
+\hline
+\end{tabular}
+
+为什么会这样？主要原因在于不需要包含头文件。使用 \texttt{std::bind} 的版本产生了 40890 行代码！相比之下，Lambda 版本只有 16 行代码！毫不意外，编译器表现出色，因为最终生成的汇编代码行数相同。这也意味着它应当能带来相同的运行时性能。
+
+下面是在一些更贴近现实的场景（当我们引入标准库中的其他类型时）下的其他实验：
+
+\begin{itemize}
+\item 使用 \texttt{std::cout} @BuildBench\footnote{\url{https://build-bench.com/b/CgjIf0axxeVEMEYpgH5bB2rUvEk}} - 现在快了 40\%（见 \texttt{Ex6\_3}），
+\item 使用额外的算法 @BuildBench\footnote{\url{https://build-bench.com/b/VGmSdXBSv6MYn4P5MWbSIYQwCbw}} - 仅快了 10\%（见 \texttt{Ex6\_4}）。
+\end{itemize}
+
+由于 Lambda 表达式是纯粹的语言特性，编译器的工作要简单得多，生成的 C++ 代码也小得多。它可能无法带来更好的运行时性能（因为编译器可以优化大量库代码并使其内联），但它们会带来更整洁的代码。
+
+\section{Lambda 提升了代码的局部性}
+
+在 C++98/03 中，你不得不创建函数或自定义函数对象，而它们可能与你将其作为可调用对象传入的位置相距甚远。
+
+在简单的人为示例上很难展示这一点，但你可以想象一个超过一千行代码的大型源文件。代码的组织方式可能导致函数对象类型位于文件的某一节（例如文件顶部）。而函数对象的使用可能远在代码的数百行之后或之前。如果你想查看某个特定函数对象的定义，就不得不跳转到文件中完全不同的位置。这种跳转可能会拖慢你的工作效率。
+
+\myGraphic{0.8}{images/fig_p148_1.png}{在源文件中的来回跳转}
+
+我们还应该在第一点和第二点的基础上补充一点。Lambda 提升了局部性与可读性，但也涉及命名这一方面。由于 Lambda 是匿名的，你无需为你所有的小型函数或函数对象挑选一个有意义的名字。
+
+\section{Lambda 让状态存储变得轻松}
+
+在 C++11 章节中，我们介绍了一个简单的例子：修改 \texttt{std::sort} 的默认比较器，以便统计调用次数。
+
+\begin{codeboxt}{代码清单 6.5 捕获状态（在线代码见 @Compiler Explorer）}
+#include <algorithm>
+#include <iostream>
+#include <vector>
+int main() {
+std::vector<int> vec { 0, 5, 2, 9, 7, 6, 1, 3, 4, 8 };
+size_t compCounter = 0;
+std::sort(vec.begin(), vec.end(),
+[&compCounter](int a, int b) noexcept {
+++compCounter;
+return a < b;
+});
+std::cout << "number of comparisons: " << compCounter << '\n';
+for (const auto& v : vec)
+std::cout << v << ", ";
+}
+\end{codeboxt}
+
+如你所见，我们可以捕获一个局部变量，然后在二元比较器的所有调用中重复使用它。这种行为用普通函数是无法实现的\footnote{你可以在普通函数中使用全局变量或静态变量，但这不是最佳方案。}，但用自定义函数对象类型也不直观。Lambda 让这一切变得非常自然，而且使用起来也非常方便。
+
+\section{Lambda 允许在同一处放置多个重载}
+
+这是与 Lambda 以及现代 C++ 几项重要特性（主要自 C++17 起可用）相关的最酷例子之一。我们在 C++17 章节中学习了这一技巧，当时讨论了从多个 Lambda 继承的能力。
+
+请看：
+
+\begin{codeboxt}{代码清单 6.6 重载模式（在线代码见 @Compiler Explorer）}
+#include <iostream>
+#include <string>
+#include <variant>
+template<class... Ts> struct overload : Ts... { using Ts::operator()...; };
+template<class... Ts> overload(Ts...) -> overload<Ts...>;
+int main() {
+std::variant<int, float, std::string> intFloatString { "Hello" };
+std::visit(overload
+{
+[](const int& i) { std::cout << "int: " << i; },
+[](const float& f) { std::cout << "float: " << f; },
+[](const std::string& s) { std::cout << "string: " << s; }
+},
+intFloatString
+);
+}
+\end{codeboxt}
+
+上述例子是一种便捷的方式，可以即时为 \texttt{variant} 类型构建包含所有可能重载的可调用对象。重载模式在概念上等价于如下结构体（PrintVisitor）：
+
+\begin{codebox}
+struct PrintVisitor {
+void operator()(int& i) const { cout << "int: " << i; }
+void operator()(float& f) const { cout << "float: " << f; }
+void operator()(const std::string& s) const { cout << "str: " << s; }
+};
+\end{codebox}
+
+此外，也可以编写一个紧凑的泛型 Lambda，适用于 variant 对象中的所有类型。这可以支持基于 \texttt{std::variant} 的运行时多态。
+
+\begin{codeboxt}{代码清单 6.7 基于 std::variant/std::visit 的运行时多态（在线代码见 @Compiler Explorer）}
+#include <variant>
+struct Circle { void Draw() const { } };
+struct Square { void Draw() const { } };
+struct Triangle { void Draw() const { } };
+int main() {
+std::variant<Circle, Square, Triangle> shape;
+shape = Triangle{};
+const auto callDraw = [](auto& sh) { sh.Draw(); };
+std::visit(callDraw, shape);
+}
+\end{codeboxt}
+
+这一技巧是取代基于虚函数的运行时多态的一种替代方案。在这里，我们可以使用互不相关的类型，无需共同的基类。你可以在我的博客文章《基于 \texttt{std::variant} 与 \texttt{std::visit} 的运行时多态》\footnote{原书此处有脚注 32（原文标注为 \textsuperscript{32}），但源文件未提供脚注正文。} 中了解更多相关内容。
+
+\section{Lambda 随着 C++ 的每次修订而变得更好！}
+
+C++11 中 Lambda 的初始版本有一些局限，但随着每个新 C++ 标准的发布，这些问题被修正，并加入了新特性。
+
+以下是我们在各个 C++ 标准（C++11 之后）中获得的与 Lambda 相关的主要变更列表：
+
+\textbf{C++14}
+
+\begin{itemize}
+\item 默认参数——这是一个小特性，但让 Lambda 更接近普通函数。
+\item 泛型 Lambda——你可以传入 \texttt{auto} 实参，然后编译器会将这段代码展开为函数模板。
+\begin{itemize}
+\item 这种灵活性带来了诸如递归 Lambda 之类的技巧。
+\end{itemize}
+\item 带初始化器的捕获——借助这一特性，你不仅可以捕获外层作用域中已有的变量，还可以为 Lambda 创建新的状态变量。
+\begin{itemize}
+\item 这一特性使我们能够捕获仅可移动类型，或在捕获数据成员时更加明确。
+\item 变长泛型实参也是可能的！
+\end{itemize}
+\item 普通函数与 Lambda 在 \texttt{auto} 返回类型推导上有了统一的规范。
+\end{itemize}
+
+\textbf{C++17}
+
+\begin{itemize}
+\item \texttt{constexpr} Lambda——在 C++17 中，你的 Lambda 可以在 \texttt{constexpr} 上下文中工作。
+\item 捕获 \texttt{this} 的改进——在 C++17 之前，\texttt{this} 指针仅作为指针被捕获，会导致悬垂问题。在 C++17 中，你可以捕获由 \texttt{this*} 所代表对象的副本。
+\item 可改进泛型变长 Lambda 的折叠表达式。
+\item \texttt{std::invoke} 是标准库新增的一项内容，它让 IIFE 表达式更具可读性。
+\item 类模板实参推导以及对聚合初始化的扩展，使得实现重载模式成为可能。
+\end{itemize}
+
+\textbf{C++20}
+
+\begin{itemize}
+\item 模板 Lambda——对泛型 Lambda 的改进，对输入的模板实参提供了更多控制。
+\item Lambda 与概念——Lambda 也可以配合受约束的 \texttt{auto} 与概念（Concepts）工作，因此它们与函数对象及函数模板一样灵活。
+\item 处于非求值上下文中的 Lambda——你现在可以创建一个 map 或 set，并使用 Lambda 作为谓词。
+\item 你现在可以捕获结构化绑定。
+\item Lambda 可以被标记为 \texttt{consteval}，从而只在编译期求值。
+\item 捕获形参包（Parameter Pack）有了更优雅的语法。
+\item 无状态 Lambda 默认可构造且可赋值。
+\end{itemize}

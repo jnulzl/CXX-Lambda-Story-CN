@@ -1,0 +1,802 @@
+\section{Lambda 的默认形参}
+
+我们从一些较小的更新开始：在 C++14 中，你可以在函数调用中使用默认形参。这是个小特性，但让 Lambda 表达式更像一个普通函数。
+
+\begin{codeboxt}{代码清单 3.1 带默认形参的 Lambda（在线代码见 @Wandbox）}
+#include <iostream>
+int main() {
+const auto lam = [](int x = 10) { std::cout << x << '\n'; };
+lam();
+lam(100);
+}
+\end{codeboxt}
+
+在上面的例子中，我们把该 Lambda 调用了两次。第一次没有任何实参，于是它使用默认值 \texttt{x = 10}。第二次我们传入了 100。有趣的是，GCC 和 Clang 从 C++11 起就已经支持了这一特性。
+
+\section{返回类型推导}
+
+如果你还记得上一章的内容，简单 Lambda 的返回类型可由编译器推导。在 C++14 中，这一功能被“扩展”到了普通函数，你可以使用 \texttt{auto} 作为返回类型：
+
+\begin{codebox}
+auto myFunction() {
+const int x = computeX(...);
+const int y = computeY(...);
+return x + y;
+}
+\end{codebox}
+
+上面，编译器会把 \texttt{int} 推导为返回类型。对于 Lambda 表达式来说，在 C++14 中这意味着它们与带有 \texttt{auto} 返回类型的函数遵循相同的规则。我们来看一下标准 [expr.prim.lambda\#4]\footnote{\url{https://timsong-cpp.github.io/cppwp/n4140/expr.prim.lambda\#4}}：
+
+Lambda 的返回类型是 \texttt{auto}，如果提供了尾置返回类型，则由它替换，并按照 dcl.spec.auto 中的描述从 return 语句推导得出。
+
+如果你有多个 return 语句，它们都必须推导出相同的类型：
+
+\begin{codebox}
+auto foo = [] (int x) {
+if (x < 0) return x * 1.1f; // float！
+return x * 2.1;
+// double！
+};
+\end{codebox}
+
+上面的代码无法编译，因为第一条 return 语句返回的是 \texttt{float}，而第二条返回的是 \texttt{double}。编译器无法决定，因此你只能选定单一类型。
+
+虽然推导整数或双精度数可能有所帮助，但返回类型推导之所以重要，还有更深层的原因。这一功能在模板代码以及“未知”事物方面扮演着相当重要的角色。
+
+例如，Lambda 闭包类型是匿名的，我们无法在代码中显式指定它。如果你想从一个函数返回 Lambda，那么该怎样指定其类型呢？在 C++14 之前，你可以使用 \texttt{std::function}：
+
+\begin{codeboxt}{代码清单 3.2 返回 std::function（在线代码见 @Wandbox）}
+#include <functional>
+#include <iostream>
+std::function<int(int)> CreateMulLambda(int x) {
+return [x](int param) noexcept { return x * param; };
+}
+int main() {
+const auto lam = CreateMulLambda(10);
+std::cout << sizeof(lam);
+return lam(2);
+}
+\end{codeboxt}
+
+然而，上述方案并不直观。它要求你指定函数签名，甚至还要包含额外的头文件 \texttt{<functional>}。如果你还记得 C++11 那一章，\texttt{std::function} 是一个“重量级”对象（在 GCC 9 中，\texttt{sizeof} 显示为 32 字节），并且需要一些高级的内部机制，才能处理任意可调用对象。
+
+多亏了 C++14 的改进，我们现在可以简化代码：
+
+\begin{codeboxt}{代码清单 3.3 Lambda 的 auto 返回类型推导（在线代码见 @Wandbox）}
+#include <iostream>
+auto CreateMulLambda(int x) noexcept {
+return [x](int param) noexcept { return x * param; };
+}
+int main() {
+const auto lam = CreateMulLambda(10);
+std::cout << sizeof(lam);
+return lam(2);
+}
+\end{codeboxt}
+
+这一次我们可以完全依赖编译期类型推导，无需任何辅助类型。在 GCC 上，Lambda 的 \texttt{sizeof(lam)} 仅为 4 字节，远比使用 \texttt{std::function} 的方案廉价。请注意，我们还可以把 \texttt{CreateMulLambda} 标记为 \texttt{noexcept}，因为它不可能抛出任何异常。而在返回 \texttt{std::function} 时就做不到这一点。
+
+\section{带初始化器的捕获}
+
+现在来一些更重要的更新！
+
+正如你所回忆的，在 Lambda 表达式中，你可以从外部作用域捕获变量。编译器会展开该捕获语法，并在闭包类型中创建相应的非静态数据成员。
+
+现在，在 C++14 中，你可以创建新的数据成员，并在捕获子句中初始化它们。随后你就可以在 Lambda 内部访问这些变量。这被称为带初始化器的捕获（capture with an initialiser），该特性的另一个名字是泛型 Lambda 捕获（generalised lambda capture）。
+
+例如：
+
+\begin{codeboxt}{代码清单 3.4 带初始化器的捕获（在线代码见 @Wandbox）}
+#include <iostream>
+int main() {
+int x = 30;
+int y = 12;
+const auto foo = [z = x + y]() { std::cout << z << '\n'; };
+x = 0;
+y = 0;
+foo();
+}
+\end{codeboxt}
+
+输出：
+
+\begin{codebox}
+42
+\end{codebox}
+
+在上面的例子中，编译器生成了一个新的数据成员，并用 \texttt{x+y} 对其进行初始化。新变量的类型推导方式，与你在该新变量前加上 \texttt{auto} 时相同。在我们的例子中：
+
+\begin{codebox}
+auto z = x + y;
+\end{codebox}
+
+总而言之，前面例子中的 Lambda 会解析为如下（简化了的）可调用类型：
+
+\begin{codebox}
+struct _unnamedLambda {
+void operator()() const {
+std::cout << z << '\n';
+}
+int z;
+} someInstance;
+\end{codebox}
+
+\texttt{z} 会在 Lambda 表达式被定义时直接初始化（用 \texttt{x+y}）。请记住上一句话。新变量是在你定义 Lambda 的地方、而非调用它的地方被初始化的。
+
+这就是为什么，如果你在创建 Lambda 之后修改了 \texttt{x} 或 \texttt{y} 变量，变量 \texttt{z} 也不会改变。在例子中你可以看到，我在 Lambda 刚一定义后就修改了 \texttt{x} 和 \texttt{y} 的值。但输出仍然会是 \texttt{42}，因为 \texttt{z} 在此之前就已经被初始化了。
+
+通过初始化器创建变量也很灵活，因为例如你可以创建指向外部作用域变量的引用。
+
+\begin{codeboxt}{代码清单 3.5 作为带初始化器的引用捕获（在线代码见 @Wandbox）}
+#include <iostream>
+int main() {
+int x = 30;
+const auto foo = [&z = x]() { std::cout << z << '\n'; };
+foo();
+x = 0;
+foo();
+}
+\end{codeboxt}
+
+这一次，变量 \texttt{z} 是对 \texttt{x} 的引用。它的创建方式与你写下下列代码相同：
+
+\begin{codebox}
+auto &z = x;
+\end{codebox}
+
+如果你运行这个例子，应该会看到第一行打印出 \texttt{30}，而第二行显示 \texttt{0}。这是因为我们捕获的是引用，所以当你修改被引用的变量时，\texttt{z} 对象也会随之改变。
+
+\subsection{局限性}
+
+请注意，虽然你可以使用初始化器按引用捕获，但无法写出右值引用 \texttt{\&\&}。这就是为什么下面这段代码是非法的：
+
+\begin{codebox}
+[&&z = x] // 非法语法！
+\end{codebox}
+
+该特性的另一个局限是它不允许参数包。让我们看一下 [expr.prim.lambda] 的第 24 节\footnote{\url{https://timsong-cpp.github.io/cppwp/n4140/expr.prim.lambda\#24}}：
+
+简单捕获后跟省略号是包展开（[temp.variadic]）。初始化捕获后跟省略号是非法的（ill-formed）。
+
+换句话说，在 C++14 中，你不能写出：
+
+\begin{codebox}
+template<class... Args>
+auto captureTest(Args... args) {
+return lambda = [...capturedArgs = std::move(args)](){};
+// ...
+}
+\end{codebox}
+
+不过，这种语法在 C++20 中将成为可能，详见第 114 页本节内容。
+
+\subsection{对已有问题的改进}
+
+C++14 中带初始化器的捕获新功能可以解决一些问题，例如处理仅可移动类型，或者带来一些额外的优化。
+
+现在让我们逐一回顾。
+
+\subsubsection{移动}
+
+在早先的 C++11 中，你无法按值捕获 unique 指针，只能按引用捕获。而现在，自 C++14 起，我们可以把一个对象移动（move）进闭包类型的一个成员中：
+
+\begin{codeboxt}{代码清单 3.6 捕获仅可移动类型（在线代码见 @Wandbox）}
+#include <iostream>
+#include <memory>
+int main(){
+std::unique_ptr<int> p(new int{10});
+const auto bar = [ptr=std::move(p)] {
+std::cout << "pointer in lambda: " << ptr.get() << '\n';
+};
+std::cout << "pointer in main(): " << p.get() << '\n';
+bar();
+}
+\end{codeboxt}
+
+输出：
+
+\begin{codebox}
+pointer in main(): 0
+pointer in lambda: 0x1413c20
+\end{codebox}
+
+多亏了捕获初始化器，你可以把指针的所有权移入 Lambda。如例子所示，unique 指针在闭包对象刚一创建之后就被置为 \texttt{nullptr}。但当你调用 Lambda 时，就会看到一个有效的内存地址。
+
+\subsubsection{\texttt{std::function} 的一个陷阱}
+
+在 Lambda 中持有一个仅可移动的被捕获变量，会使得闭包对象不可复制。如果你想把这样的 Lambda 存入 \texttt{std::function}（它只接受可复制的可调用对象），这可能就会成为问题。
+
+如果我们对前面的例子运行 C++Insights（相关在线代码见此链接\footnote{\url{https://cppinsights.io/s/5d11eb8f}}），就能详细地观察到这一点。你会看到 \texttt{std::unique\_ptr} 是闭包类型的一个数据成员，而拥有一个仅可移动的成员会阻止编译器生成默认的复制构造函数。
+
+简而言之，下面这段代码无法编译：
+
+\begin{codeboxt}{代码清单 3.7 std::function 与 std::move（在线代码见 @Wandbox）}
+std::unique_ptr<int> p(new int{10});
+std::function<void()> fn = [ptr = std::move(p)]() { }; // 无法编译！
+\end{codeboxt}
+
+
+如果你想了解全部细节，还可以参阅 \texttt{any\_invocable}（P0288\footnote{\url{https://wg21.link/P0288}}）提案，它是针对 \texttt{std::function} 的一个可能的未来改进，也能处理仅可移动类型。
+
+\subsubsection{优化}
+
+另一个思路是把捕获初始化器用作一种潜在的优化手段。与其在每次调用 Lambda 时都计算某个值，不如在初始化器中计算一次：
+
+\begin{codeboxt}{代码清单 3.8 为 Lambda 创建字符串（在线代码见 @Wandbox）}
+#include <algorithm>
+#include <iostream>
+#include <string>
+#include <vector>
+int main() {
+using namespace std::string_literals;
+const std::vector<std::string> vs = { "apple", "orange",
+"foobar", "lemon" };
+const auto prefix = "foo"s;
+auto result = std::find_if(vs.begin(), vs.end(),
+[&prefix](const std::string& s) {
+return s == prefix + "bar"s;
+}
+);
+if (result != vs.end())
+std::cout << prefix << "-something found!\n";
+result = std::find_if(vs.begin(), vs.end(),
+[savedString = prefix + "bar"s](const std::string& s) {
+return s == savedString;
+}
+);
+if (result != vs.end())
+std::cout << prefix << "-something found!\n";
+}
+\end{codeboxt}
+
+上面的代码展示了两次对 \texttt{std::find\_if} 的调用。在第一种情形中，我们捕获了 \texttt{prefix}，并把输入值与 \texttt{prefix + "bar"s} 进行比较。每次调用 Lambda 时，都必须创建并计算一个用来存储这些字符串之和的临时值。
+
+对 \texttt{find\_if} 的第二次调用展示了一种优化：我们创建了一个被捕获的变量 \texttt{savedString}，用来计算字符串之和。随后，我们就可以在 Lambda 体内安全地引用它。字符串的求和只会执行一次，而不是在 Lambda 的每次调用中都执行。
+
+这个例子还使用了 \texttt{std::string\_literals}，这正是我们可以写出 \texttt{"foo"s}（它表示一个 \texttt{std::string} 对象）的原因。
+
+\subsubsection{捕获类数据成员}
+
+初始化器还可以用来捕获数据成员，而无需担心 \texttt{*this} 指针。我们可以捕获数据成员的一份副本，而不必为悬空引用而烦恼。
+
+例如：
+
+\begin{codeboxt}{代码清单 3.9 捕获数据成员（在线代码见 @Wandbox）}
+#include <algorithm>
+#include <iostream>
+struct Baz {
+auto foo() const {
+return [s=s] { std::cout << s << '\n'; };
+}
+std::string s;
+};
+int main() {
+const auto f1 = Baz{"abc"}.foo();
+const auto f2 = Baz{"xyz"}.foo();
+f1();
+f2();
+}
+\end{codeboxt}
+
+在 \texttt{foo()} 中，我们通过复制把一个数据成员捕获进闭包类型。此外，我们使用 \texttt{auto} 来推导成员函数 \texttt{foo()} 的返回类型。顺便一提，在 C++11 中我们不得不使用 \texttt{std::function}，详见第 31 页 C++11 章节。
+
+可能令你感到意外的是，我们在声明 Lambda 时使用了类似 \texttt{[s=s]} 这样“奇怪”的语法。这段代码之所以能工作，是因为被捕获的变量处于闭包类型的作用域内，而非外部作用域。因此这里并不存在冲突。
+
+\section{Generic Lambdas（泛型 Lambda）}
+
+这可是个大特性！
+
+早期对 Lambda 表达式的规范允许我们创建匿名函数对象（闭包类型），并把它们传递给标准库中的各种泛型算法。然而，闭包本身并不是“泛型”的。例如，你无法把一个模板形参指定为 Lambda 的形参。幸运的是，从 C++14 起，标准引入了泛型 Lambda，现在我们可以写出：
+
+\begin{codebox}
+const auto foo = [](auto x, int y) { std::cout << x << ", " y << '\n'; };
+foo(10, 1);
+foo(10.1234, 2);
+foo("hello world", 3);
+\end{codebox}
+
+请注意 \texttt{auto x} 作为 Lambda 的形参。这等同于在闭包类型的调用运算符中使用模板声明：
+
+\begin{codebox}
+struct {
+template<typename T>
+void operator()(T x, int y) const {
+std::cout << x << ", " y << '\n';
+}
+} someInstance;
+\end{codebox}
+
+如果还有更多 \texttt{auto} 形参，那么代码会展开为各自独立的模板形参：
+
+\begin{codebox}
+const auto fooDouble = [](auto x, auto y) { /*...*/ };
+\end{codebox}
+
+展开为：
+
+\begin{codebox}
+struct {
+template<typename T, typename U>
+void operator()(T x, U y) const { /*...*/ }
+} someOtherInstance;
+\end{codebox}
+
+\subsection{Variadic Generic Arguments（变参泛型实参）}
+
+但这还不是全部。如果你需要更多的函数形参，还可以采用“变参”写法：例如：
+
+\begin{codeboxt}{代码清单 3.10 泛型变参 Lambda，求和（在线代码见 @Wandbox）}
+#include <iostream>
+template<typename T>
+auto sum(T x) { return x; }
+template<typename T1, typename... T>
+auto sum(T1 s, T... ts) { return s + sum(ts...); }
+int main() {
+const auto sumLambda = [] (auto... args) {
+std::cout << "sum of: " << sizeof...(args) << " numbers\n";
+return sum(args...);
+};
+std::cout << sumLambda(1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8, 9.9 );
+}
+\end{codeboxt}
+
+在上面的例子中，泛型 Lambda 使用 \texttt{auto...} 来表示一个变参实参包。从概念上讲，它被展开为如下调用运算符：
+
+\begin{codebox}
+struct __anonymousLambda{
+template<typename... T>
+void operator()(T... args) const { /*...*/ }
+};
+\end{codebox}
+
+
+在 C++17 中，我们获得了折叠表达式，它可以改进泛型变参 Lambda；而在 C++20 中，我们会对模板实参获得更强的控制力。欲了解更多信息，请参阅 C++17 对变参泛型 Lambda 的更新（第 91 页），以及 C++20 中关于模板 Lambda 的内容（第 115 页）。
+
+\subsection{Perfect Forwarding with Generic Lambdas（用泛型 Lambda 实现完美转发）}
+
+使用泛型 Lambda 时，你并不局限于 \texttt{auto x}，你可以像对其他 \texttt{auto} 变量那样添加任何限定符，例如 \texttt{auto\&}、\texttt{const auto\&} 或 \texttt{auto\&\&}。一个方便的用例是，你可以指定 \texttt{auto\&\& x}，它会成为一个转发（通用）引用。这让你能够对输入实参进行完美转发：
+
+\begin{codeboxt}{代码清单 3.11 用泛型 Lambda 实现完美转发（在线代码见 @Wandbox）}
+#include <iostream>
+#include <string>
+void foo(const std::string& ) { std::cout << "foo(const string&)\n"; }
+void foo(std::string&& ) { std::cout << "foo(string&&)\n"; }
+int main() {
+const auto callFoo = [](auto &&str) {
+std::cout << "Calling foo() on: " << str << '\n';
+foo(std::forward<decltype(str)>(str));
+};
+const std::string str = "Hello World";
+callFoo(str);
+callFoo("Hello World Ref Ref");
+}
+\end{codeboxt}
+
+输出如下：
+
+\begin{codebox}
+Calling foo() on: Hello World
+foo(const string&)
+Calling foo() on: Hello World Ref Ref
+foo(string&&)
+\end{codebox}
+
+上面的示例代码定义了两个 \texttt{foo} 函数重载，一个接受 \texttt{std::string} 的常量引用，另一个接受 \texttt{std::string} 的右值引用。\texttt{callFoo} Lambda 使用一个作为通用引用的泛型实参\footnote{你可以在 Scott Meyers 的这篇文章中阅读更多关于通用引用的内容：Universal References in C++11}。如果你打算把这个 Lambda 改写成一个普通的函数模板，它可能会是这样：
+
+\begin{codebox}
+template <typename T>
+void callFooFunc(T&& str) {
+std::cout << "Calling foo() on: " << str << '\n';
+foo(std::forward<T>(str));
+}
+\end{codebox}
+
+正如你所见，借助泛型 Lambda，你在编写局部匿名函数时有更多选择。
+
+但还不止于此。
+
+\subsection{Deducing the Correct Type（推导正确的类型）}
+
+此外，当类型推导比较棘手时，泛型 Lambda 可能会非常有用。例如：
+
+\begin{codeboxt}{代码清单 3.12 为 map 迭代推导正确类型（在线代码见 @Wandbox）}
+#include <algorithm>
+#include <iostream>
+#include <map>
+#include <string>
+int main() {
+const std::map<std::string, int> numbers {
+{ "one", 1 }, {"two", 2 }, { "three", 3 }
+};
+// each time entry is copied from pair<const string, int>!
+std::for_each(std::begin(numbers), std::end(numbers),
+[](const std::pair<std::string, int>& entry) {
+std::cout << entry.first << " = " << entry.second << '\n';
+}
+);
+}
+\end{codeboxt}
+
+我在这里犯了什么错误吗？\texttt{entry} 的类型正确吗？这段代码是错误的，因为 \texttt{std::map} 的值类型是 \texttt{std::pair<const Key, T>}，而不是 \texttt{const std::pair<Key, T>}。在我们的例子中，代码执行了额外的复制，原因是 \texttt{std::pair<const std::string, int>} 与 \texttt{const std::pair<std::string, int>\&} 之间的转换（即 \texttt{const std::string} 转换为 \texttt{std::string}）：
+
+这可以通过使用 \texttt{auto} 来修复：
+
+\begin{codebox}
+std::for_each(std::begin(numbers), std::end(numbers),
+[](const auto& entry) {
+std::cout << entry.first << " = " << entry.second << '\n';
+}
+);
+\end{codebox}
+
+现在，模板实参推导将正确地得到 \texttt{entry} 对象的正确类型，并且不会再产生额外的复制。更不用说代码更易读也更短了。
+
+请看下一个完整示例，其中还包含打印各条目地址的代码：
+
+\begin{codeboxt}{代码清单 3.13 为 map 迭代推导正确类型（完整版本）（在线代码见 @Wandbox）}
+#include <algorithm>
+#include <iostream>
+#include <map>
+#include <string>
+int main() {
+const std::map<std::string, int> numbers {
+{ "one", 1 }, {"two", 2 }, { "three", 3 }
+};
+// print addresses:
+for (auto mit = numbers.cbegin(); mit != numbers.cend(); ++mit)
+std::cout << &mit->first << ", " << &mit->second << '\n';
+// each time entry is copied from pair<const string, int>!
+std::for_each(std::begin(numbers), std::end(numbers),
+[](const std::pair<std::string, int>& entry) {
+std::cout << &entry.first << ", " << &entry.second << ": "
+<< entry.first << " = " << entry.second << '\n';
+}
+);
+// this time entries are not copied, they have the same addresses
+std::for_each(std::begin(numbers), std::end(numbers),
+[](const auto& entry) {
+std::cout << &entry.first << ", " << &entry.second << ": "
+<< entry.first << " = " << entry.second << '\n';
+}
+);
+}
+\end{codeboxt}
+
+下面是一个可能的输出：
+
+\begin{codebox}
+0x165dc40, 0x165dc60
+1
+0x165dce0, 0x165dd00
+2
+0x165dc90, 0x165dcb0
+3
+0x7ffe5ed29a20, 0x7ffe5ed29a40: one = 1
+4
+0x7ffe5ed29a20, 0x7ffe5ed29a40: three = 3
+5
+0x7ffe5ed29a20, 0x7ffe5ed29a40: two = 2
+6
+0x165dc40, 0x165dc60: one = 1
+7
+0x165dce0, 0x165dd00: three = 3
+8
+0x165dc90, 0x165dcb0: two = 2
+9
+\end{codebox}
+
+前三行显示的是 map 中键与值的地址。随后在第 4、5、6 行，你可以看到三个新的地址，它们是相同的，但很可能只是循环迭代时产生的临时副本。最后三行展示的是使用 \texttt{const auto\&} 的版本，你会注意到，这些地址与前三行中的地址相同。
+
+在我们的例子中，我们关注的是键的额外复制，但必须理解的是，值条目同样会被复制。当你使用像 \texttt{int} 这样复制代价很低的类型时，这可能不是问题，但如果对象更大（比如字符串），代价就要高得多。
+
+
+在 C++20 中，你将对 Lambda 的模板实参获得更强的控制力，因为这一新版 C++ 引入了模板 Lambda、概念以及受约束的 \texttt{auto} 形参。
+
+\section{Replacing \texttt{std::bind1st} and \texttt{std::bind2nd} with Lambdas（用 Lambda 替换 \texttt{std::bind1st} 和 \texttt{std::bind2nd}）}
+
+在关于 C++98/03 的章节中，我提到并展示了一些使用函数式辅助工具（例如 \texttt{std::bind1st} 和 \texttt{std::bind2nd}）的代码示例。然而，自 C++11 起这些功能已被弃用，而在 C++17 中，这些函数被移除了。
+
+像 \texttt{bind1st()}/\texttt{bind2nd()}/\texttt{mem\_fun()} 这样的函数是在 C++98 时代引入的，如今已经不需要了，因为你可以使用 Lambda 或现代替代方案。此外，这些例程并未更新以支持完美转发、变参模板、\texttt{decltype} 以及 C++11 的其他技术。因此，最好别在现代代码中使用它们。
+
+以下是被弃用的功能列表：
+
+\begin{itemize}
+\item \texttt{unary\_function()/pointer\_to\_unary\_function()}
+\item \texttt{binary\_function()/pointer\_to\_binary\_function()}
+\item \texttt{bind1st()/binder1st}
+\item \texttt{bind2nd()/binder2nd}
+\item \texttt{ptr\_fun()}
+\item \texttt{mem\_fun()}
+\item \texttt{mem\_fun\_ref()}
+\end{itemize}
+
+要替换 \texttt{bind1st}/\texttt{bind2nd}，你可以使用 Lambda，或者使用 \texttt{std::bind}（自 C++11 起可用），亦或 \texttt{std::bind\_front}（自 C++20 起可用）。
+
+让我们看看下面这段使用了旧功能的代码：
+
+\begin{codebox}
+const auto onePlus = std::bind1st(std::plus<int>(), 1);
+const auto minusOne = std::bind2nd(std::minus<int>(), 1);
+std::cout << onePlus(10) << ", " << minusOne(10) << '\n';
+\end{codebox}
+
+在前面的例子中，\texttt{onePlus} 是一个由 \texttt{std::plus} 构成的可调用对象，其第一个实参被固定。换句话说，当你写 \texttt{onePlus(n)} 时，它被“展开”为 \texttt{std::plus(1, n)}。类似地，\texttt{minusOne} 是一个由 \texttt{std::minus} 构成、第二个实参被固定为 1 的对象。因此，\texttt{minusOne(n)} 会“展开”为 \texttt{std::minus(n, 1)}。
+
+上面的语法相当复杂，所以让我们看看如何用现代 C++ 的写法来改进它。
+
+\subsection{Using Modern C++ Techniques（使用现代 C++ 技术）}
+
+让我们尝试使用 \texttt{std::bind}——它比 \texttt{bind1st} 或 \texttt{bind2nd} 更灵活。
+
+\begin{codeboxt}{代码清单 3.14 使用 std::bind 替换（在线代码见 @Compiler Explorer）}
+#include <algorithm>
+#include <functional>
+#include <iostream>
+int main() {
+using std::placeholders::_1;
+const auto onePlus = std::bind(std::plus<int>(), _1, 1);
+const auto minusOne = std::bind(std::minus<int>(), 1, _1);
+std::cout << onePlus(10) << ", " << minusOne(10) << '\n';
+}
+\end{codeboxt}
+
+\texttt{std::bind} 更加灵活，因为它可以支持多个实参，甚至可以对它们重新排序。
+
+为了管理实参，你需要使用“占位符”。在我们的例子中，我们使用了 \texttt{\_1} 来表示将要传递给最终函数对象的第一个实参。尽管 \texttt{std::bind} 比 C++98/03 的旧式辅助工具好得多，但它仍然不如 Lambda 表达式那样自然。
+
+我们可以至少写出两个使用 Lambda 的版本。第一个版本把运算所用的值硬编码：
+
+\begin{codebox}
+auto lamOnePlus1 = [](int b) { return 1 + b; };
+auto lamMinusOne1 = [](int b) { return b - 1; };
+std::cout << lamOnePlus1(10) << ", " << lamMinusOne1(10) << '\n';
+\end{codebox}
+
+不过，自 C++14 起，我们还可以利用带初始化器的捕获，从而更加灵活：
+
+\begin{codebox}
+auto lamOnePlus = [a=1](int b) { return a + b; };
+auto lamMinusOne = [a=1](int b) { return b - a; };
+std::cout << lamOnePlus(10) << ", " << lamMinusOne(10) << '\n';
+\end{codebox}
+
+Lambda 版本要清晰、易读得多。在下面这个更复杂的例子中，这一点会体现得更加明显。
+
+\subsection{Function Composition（函数组合）}
+
+作为最后一个例子，让我们看看下面这段关于函数组合的代码：
+
+\begin{codeboxt}{代码清单 3.15 用 std::bind 实现函数组合（在线代码见 @Compiler Explorer）}
+#include <algorithm>
+#include <functional>
+#include <vector>
+int main() {
+using std::placeholders::_1;
+const std::vector<int> v { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+const auto val = std::count_if(v.begin(), v.end(),
+std::bind(std::logical_and<bool>(),
+std::bind(std::greater<int>(), _1, 2),
+std::bind(std::less<int>(), _1, 6)));
+return val;
+}
+\end{codeboxt}
+
+你能立刻看懂那里发生了什么\footnote{我故意用 val 这个含糊的名字，所以它的含义并不明确。}？
+
+现在，让我们用一个简单的 Lambda 表达式来重写这个复杂的组合：
+
+\begin{codebox}
+const std::vector<int> v { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+const auto more2less6 = std::count_if(v.begin(), v.end(),
+[](int x) { return x > 2 && x < 6;});
+\end{codebox}
+
+这样是不是好多了？
+
+
+你可以在以下资源中阅读关于 \texttt{std::bind} 与 Lambda 表达式用法的更多准则：在《Effective Modern C++》的 Item 34“优先使用 Lambda 而非 \texttt{std::bind}”，以及 Google Abseil 博客的 Tip of the Week \#108：避免使用 \texttt{std::bind}\textsuperscript{9}。
+
+\section{LIFTing with lambdas（用 Lambda 实现 LIFT）}
+
+尽管标准库中的算法用起来很方便，但有些问题仍然难以解决。其中之一就是把函数重载传入接受可调用对象的函数模板。
+
+例如：
+
+调用函数重载
+
+\begin{codebox}
+#include <algorithm>
+#include <vector>
+// two overloads:
+void foo(int) {}
+void foo(float) {}
+int main() {
+const std::vector<int> vi { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+std::for_each(vi.begin(), vi.end(), foo);
+}
+\end{codebox}
+
+在上面的例子中，我们尝试使用具有 \texttt{int} 和 \texttt{float} 两个重载的 \texttt{foo}，并把它传入 \texttt{for\_each}。不幸的是，我们从 GCC 9（trunk）得到了如下错误：
+
+\begin{codebox}
+error: no matching function for call to
+for_each(std::vector<int>::iterator, std::vector<int>::iterator,
+<unresolved overloaded function type>)
+std::for_each(vi.begin(), vi.end(), foo);
+^^^^^
+\end{codebox}
+
+这里的主要问题是，编译器把 \texttt{foo} 看作一个模板形参，因此需要对它的类型进行决议。但要这么做，编译器就得检查 \texttt{foo} 接受哪些类型，而这做不到。
+
+不过，有一个技巧：我们可以使用一个 Lambda，然后在其中调用期望的函数重载。
+
+以最基本的形式，对于简单的数值类型，针对我们的两个函数，我们可以写出如下代码：
+
+\begin{codebox}
+std::for_each(vi.begin(), vi.end(), [](auto x) { return foo(x); });
+\end{codebox}
+
+现在，我们有了一个包装器（一个泛型 Lambda），它负责处理重载决议，并调用 \texttt{foo()} 合适的重载。
+
+我们可以通过使用完美转发来改进它：
+
+\begin{codebox}
+std::for_each(vi.begin(), vi.end(), [](auto&& x) {
+return foo(std::forward<decltype(x)>(x); }
+);
+\end{codebox}
+
+下面是一个可运行的例子：
+
+\begin{codeboxt}{代码清单 3.16 泛型 Lambda 与函数重载（在线代码见 @Wandbox）}
+#include <algorithm>
+#include <iostream>
+#include <vector>
+void foo(int i) { std::cout << "int: " << i << "\n"; }
+void foo(float f) { std::cout << "float: " << f << "\n"; }
+int main() {
+const std::vector<int> vi { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+std::for_each(vi.begin(), vi.end(), [](auto&& x) {
+return foo(std::forward<decltype(x)>(x));
+});
+}
+\end{codeboxt}
+
+然而，对于更复杂的场景，这可能并不是一个理想的方案。原因在于，我们没有处理变参实参与异常说明。
+
+如果你需要一个更通用、更好的方案，那就得再写多一点代码：
+
+\begin{codebox}
+#define LIFT(foo) \
+[](auto&&... x) \
+noexcept(noexcept(foo(std::forward<decltype(x)>(x)...))) \
+-> decltype(foo(std::forward<decltype(x)>(x)...)) \
+{ return foo(std::forward<decltype(x)>(x)...); }
+\end{codebox}
+
+相当复杂的代码……对吧？ :)
+
+我们来拆解一下。其中有三段重复的部分：
+
+\begin{itemize}
+\item \texttt{return foo(std::forward<decltype(x)>(x)...);} —— 这是完美转发，这样我们就能把输入实参正确地传递给 \texttt{foo} 函数，同时保留它们的类型。
+\item \texttt{noexcept(noexcept(foo(std::forward<decltype(x)>(x)...)))} —— 使用了 \texttt{noexcept} 运算符（内层的那个）来检查 \texttt{foo} 可调用对象的异常说明。根据结果，它会生成 \texttt{noexcept(true)} 或 \texttt{noexcept(false)}。
+\item \texttt{decltype(foo(std::forward<decltype(x)>(x)...))} 用于推导包装 Lambda 的返回类型。
+\end{itemize}
+
+\texttt{LIFT} 被定义成一个宏，否则你每次想创建这样的 Lambda 并把它传入算法时，都得把这段代码重写一遍。在这种情况下，宏是我们可以使用的最简语法\footnote{\url{https://wandbox.org/permlink/r81jASiPPmYXTOmx}}。
+
+在 @Wandbox 上把最终代码玩一玩\footnote{\url{https://wandbox.org/permlink/r81jASiPPmYXTOmx}}\footnote{\url{https://wandbox.org/permlink/r81jASiPPmYXTOmx}}。
+
+\section{Recursive Lambdas 递归 Lambda 表达式}
+
+如果你有一个普通函数，那么递归调用它很容易。但 Lambda 表达式也能这样做吗？我们来看看。
+
+递归的一个常见例子是计算阶乘。下面是一个普通函数的示例：
+
+\begin{codeboxt}{代码清单 3.17 用普通函数实现递归（在线代码见 @Wandbox）}
+int factorial(int n) {
+return n > 1 ? n * factorial(n - 1) : 1;
+}
+int main() {
+return factorial(5);
+}
+\end{codeboxt}
+
+然而，用 Lambda 表达式无法直接做到这一点：
+
+\begin{codeboxt}{代码清单 3.18 递归 Lambda 的错误（在线代码见 @Wandbox）}
+int main() {
+auto factorial = [](int n) {
+return n > 1 ? n * factorial(n - 1) : 1;
+};
+return factorial(5);
+}
+\end{codeboxt}
+
+这段代码无法编译！下面是 GCC 给出的错误：
+
+\begin{codebox}
+error: use of 'factorial' before deduction of 'auto'
+\end{codebox}
+
+发生这种情况是因为我们无法在 Lambda 的函数体内访问 \texttt{factorial}，因为它尚未完全求值。为了说明这个问题，我们可以把代码“展开”成一个简化的函数对象类型：
+
+\begin{codebox}
+struct fact {
+int operator()(int n) const {
+return n > 1 ? n * factorial(n - 1) : 1;
+};
+};
+auto factorial = fact{};
+\end{codebox}
+
+如你所见，在 \texttt{operator()} 内部，我们无法访问可调用类型的变量。
+
+如果你需要递归调用 Lambda，至少有两种技巧可以利用：
+\begin{itemize}
+\item 使用 \texttt{std::function} 并捕获它。
+\item 使用内部 Lambda 并将其作为泛型形参传递。
+\end{itemize}
+
+我们来看看第一种方案：
+
+\begin{codebox}
+With std::function
+\end{codebox}
+
+主要思想是，我们可以把一个 Lambda 赋给 \texttt{std::function}\footnote{²我们在 C++11 章节的“The Type of a Lambda Expression”中讨论过赋给 std::function 的问题。}²，然后把这个对象捕获进 Lambda 的函数体。
+
+\begin{codeboxt}{代码清单 3.19 用 std::function 实现递归 Lambda（在线代码见 @Wandbox）}
+#include <functional>
+int main() {
+const std::function<int(int)> factorial = [&factorial](int n) {
+return n > 1 ? n * factorial(n - 1) : 1;
+};
+return factorial(5);
+}
+\end{codeboxt}
+
+在之前的代码示例中，我们在 Lambda 函数体内调用了 \texttt{factorial}，它是一个被捕获的 \texttt{std::function} 对象。这个对象已完全定义，因此编译器在访问和调用它时没有任何问题。
+
+如果你只想使用无状态 Lambda，那么甚至可以尝试用函数指针而不是 \texttt{std::function}，因为前者占用的内存要少得多。
+
+但还有一个技巧：
+
+\subsection{Internal Lambda and a Generic Parameter 内部 Lambda 与泛型形参}
+
+得益于 C++14，我们可以使用以下替代方案：
+
+\begin{codeboxt}{代码清单 3.20 用内部实现实现递归 Lambda（在线代码见 @Wandbox）}
+int main() {
+const auto factorial = [](int n) noexcept {
+const auto f_impl = [](int n, const auto& impl) noexcept -> int {
+return n > 1 ? n * impl(n - 1, impl) : 1;
+};
+return f_impl(n, f_impl);
+};
+return factorial(5);
+}
+\end{codeboxt}
+
+这次我们创建了一个执行主要处理工作的内部 Lambda（\texttt{f\_impl}）。随后，我们向它传递一个泛型实参（\texttt{const auto\& impl}）。这个形参是一个可调用对象，我们可以递归地调用它。得益于 C++14 中的泛型 Lambda，我们可以避免 \texttt{std::function} 的开销，并依赖 auto 类型推导。
+
+\subsection{More Tricks 更多技巧}
+
+如果你想了解更多技巧，还可以参考以下资源：
+\begin{itemize}
+\item c++ - Recursive lambda functions in C++11 - Stack Overflow¹³
+\item Recursive lambdas in C++(14) - Pedro Melendez¹⁴
+\end{itemize}
+
+¹³https://stackoverflow.com/questions/2067988/recursive-lambda-functions-in-c11
+
+¹⁴http://pedromelendez.com/blog/2015/07/16/recursive-lambdas-in-c14/
+
+\subsection{Is a recursive lambda the best alternative? 递归 Lambda 是最佳替代方案吗？}
+
+在本节中，你可以看到 Lambda 表达式的一些技巧。不过，这些技术的复杂度远超“仅用递归函数调用”这种简单方案。因此，在某些情况下，递归 Lambda 并非最佳、最直接的选项。另一方面，复杂的递归 Lambda 的优势在于其局部性，以及能够接受 \texttt{auto} 形参。
+
+\section{Summary 小结}
+
+正如你在这一章所看到的，C++14 为 Lambda 表达式带来了若干关键改进。自 C++14 起，你现在可以声明新的变量在 Lambda 作用域内使用，并且还能在模板代码中高效地使用它们。在下一章，我们将深入 C++17，它会带来更多更新！

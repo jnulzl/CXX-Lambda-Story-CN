@@ -1,0 +1,12 @@
+% ============================================================
+%  main.tex
+%  C++ Lambda 表达式全解（中文翻译版 · LaTeX 工程）
+%  编译：xelatex -shell-escape -interaction=nonstopmode main.tex（跑两遍）
+%  须先设置 TEXMF_OUTPUT_DIRECTORY 指向本工程绝对根（见 README / 编译命令）
+% ============================================================
+\input{book/ccs.tex}   % 导言区（模板用 \include，这里改用 \input 避免 LaTeX 警告）
+
+\begin{document}
+% 【不要】用 \sloppypar 包住全书：见 ccs.tex 的 \emergencystretch=1em 兜底。
+\subfile{book/index.tex}
+\end{document}

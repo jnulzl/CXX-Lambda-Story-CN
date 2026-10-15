@@ -1,0 +1,506 @@
+2020 年 2 月，ISO 委员会在布拉格会议上终于批准了 C++20 标准，并将其送交正式出版（大概在 2020 年底）。新规范给语言和标准库带来了大量实质性改进！Lambda 表达式也获得了一些升级。
+
+在本章中，你将看到：
+
+\begin{itemize}
+\item C++20 中有哪些变化。
+\item 捕获 \texttt{this} 指针的新选项。
+\item 模板 Lambda。
+\item 如何用概念改进泛型 Lambda。
+\item 如何在带有 \texttt{constexpr} 的算法中使用 Lambda。
+\item 如何把 \texttt{overloaded} 模式写得更短。
+\end{itemize}
+
+你可以查阅与 Lambda 相关的规范：N4861\footnote{\url{https://timsong-cpp.github.io/cppwp/n4861/}}（当前的 C++20 草案，布拉格会议之后的版本），以及 Lambda 小节：\texttt{[expr.prim.lambda]}\footnote{\url{https://timsong-cpp.github.io/cppwp/n4861/expr.prim.lambda}}。
+
+\section{Lambda 语法更新}
+
+在 C++20 中，Lambda 表达式的语法还有更多变化：
+
+\begin{itemize}
+\item 现在可以在形参列表之后添加 \texttt{consteval}。
+\item 可以指定模板尾（template tail）。
+\item 在尾置返回类型之后可以放置 \texttt{requires} 声明。
+\end{itemize}
+
+下面是更新后的语法示意图：
+
+\myGraphic{0.8}{images/fig_p126_1.png}{C++20 中的 Lambda 语法}
+
+你可以在后续小节中了解这些新改动。
+
+\section{变更速览}
+
+在 C++20 中，我们获得了以下与 Lambda 表达式相关的特性：
+
+\begin{itemize}
+\item 允许把 \texttt{[=, this]} 用作 Lambda 捕获（P0409R2\footnote{\url{https://wg21.link/p0409r2}}），并弃用通过 \texttt{[=]} 对 \texttt{this} 的隐式捕获（P0806\footnote{\url{https://wg21.link/P0806}}）。
+\item Lambda 初始化捕获中的包展开：\texttt{...args = std::move(args)](){}}（P0780\footnote{\url{https://wg21.link/P0780}}）。
+\item \texttt{static}、\texttt{thread\_local} 以及针对结构化绑定的 Lambda 捕获（P1091\footnote{\url{https://wg21.link/P1091}}）。
+\item 模板 Lambda（也可配合概念使用）（P0428R2\footnote{\url{https://wg21.link/P0428R2}}）。
+\item 简化 Lambda 的隐式捕获（P0588R1\footnote{\url{https://wg21.link/P0588R1}}）。
+\item 默认可构造、可赋值的无状态 Lambda（P0624R2\footnote{\url{https://wg21.link/P0624R2}}）。
+\item 非求值上下文中的 Lambda（P0315R4\footnote{\url{https://wg21.link/P0315R4}}）。
+\item \texttt{constexpr} 算法——最重要的是 P0202\footnote{\url{https://wg21.link/p0202}}、P0879\footnote{\url{https://wg21.link/P0879}} 和 P1645\footnote{\url{https://wg21.link/P1645}}。
+\end{itemize}
+
+如果你想进一步了解 C++20，可以看看那篇总结了所有变更的论文：Changes between C++17 and C++20 DIS（P2131\footnote{\url{https://wg21.link/P2131}}）。你还可以查看我的速查卡，其中涵盖了所有语言与库特性：Bartek 的编码博客：C++20 Reference Card\footnote{参见作者的 C++20 速查卡（见其博客）。}。
+
+现在让我们快速浏览其中一些变更。在大多数情况下，新增特性“清理”了 Lambda 的语法。此外，C++20 还增加了一些增强，让我们能在更高级的场景中使用 Lambda。例如，借助 P1091\footnote{\url{https://wg21.link/P1091}} 你可以捕获一个结构化绑定：
+
+\begin{codeboxt}{代码清单 5.1 在 Lambda 中捕获结构化绑定（在线代码见 @Wandbox）}
+#include <tuple>
+#include <string>
+auto GetParams() {
+return std::tuple { std::string{"Hello World"}, 42 };
+}
+int main() {
+auto [x, y] = GetParams();
+const auto ParamLength = [&x, &y]() { return x.length() + y; }();
+return ParamLength;
+}
+\end{codeboxt}
+
+
+有些编译器在 C++17 中就已经支持捕获结构化绑定（例如 GCC），但当时标准并未强制要求这一点。
+
+C++20 还针对 \texttt{*this} 捕获做了澄清。如果你在成员函数里用 \texttt{[=]} 捕获，会得到一个警告：
+
+\begin{codeboxt}{代码清单 5.2 关于隐式 *this 捕获的警告（在线代码见 @Wandbox）}
+struct Baz {
+auto foo() {
+return [=] { std::cout << s << '\n'; };
+}
+std::string s;
+};
+\end{codeboxt}
+
+用 GCC 9 编译会产生如下警告：
+
+\begin{codebox}
+warning: implicit capture of 'this' via '[=]' is deprecated in C++20
+\end{codebox}
+
+之所以出现这个警告，是因为即便使用 \texttt{[=]}，你捕获的 \texttt{this} 也是一个指针。更清楚地写出你的意图会更好：\texttt{[=, this]} 或 \texttt{[=, *this]}。
+
+简单回顾之后，我们来看 C++20 中更突出的、与 Lambda 相关的特性。
+
+\subsection{consteval Lambdas}
+
+C++11 的 \texttt{constexpr} 允许函数在编译阶段执行，但这些函数也可以在运行时运行。看起来，在某些情况下，最好把功能限制为只能在编译期进行。因此，C++20 引入了一个新关键字，它创建的函数遵循 \texttt{constexpr} 函数的规则，却只能在编译期求值。这类函数也被称为“立即函数”（immediate functions）。
+
+这个新关键字也可以应用于 Lambda。来看一个简单的例子：
+
+\begin{codeboxt}{代码清单 5.3 一个简单的即时 Lambda（在线代码见 @Wandbox）}
+int main() {
+const int x = 10;
+auto lam = [](int x) consteval { return x + x; };
+return lam(x);
+}
+\end{codeboxt}
+
+如上所示，我们在 Lambda 的实参列表之后加上了 \texttt{consteval}。这与 \texttt{constexpr} 的用法非常相似。关键区别在于：如果你去掉 \texttt{x} 的 \texttt{const}，那么 \texttt{constexpr} Lambda 仍能工作（在运行时），而即时 Lambda 则无法通过编译。
+
+默认情况下，如果 Lambda 函数体符合 \texttt{constexpr} 函数的规则，编译器会隐式地把调用运算符标记为 \texttt{constexpr}。\texttt{consteval} 则不同，它对这类代码施加了更强的限制。而且你不能同时使用这两个关键字。关于这一新特性的完整规范，可以参阅这份提案：P1073R3\footnote{\url{http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p1073r3.html}}。
+
+\subsection{捕获参数包}
+
+我们在 C++20 中得到的一项改进，是 Lambda 初始化捕获中的包展开。
+
+\begin{codebox}
+template <typename ...Args> void call(Args&&... args) {
+auto ret = [...capturedArgs = std::move(args)](){};
+}
+\end{codebox}
+
+在 C++20 之前，这段代码无法通过编译（关于这一点，参见第 35 页的 C++11 小节），为了绕开这个问题，你不得不把实参包进一个单独的元组。你可以在 P0780\footnote{\url{https://wg21.link/P0780}} 中了解这一捕获限制的历史。
+
+总而言之，要捕获可变参数包，我们可以拿 C++11 章节里的例子来试验，加上这一最新特性。例如，我们可以利用折叠表达式来打印每一个被捕获的对象：
+
+\begin{codeboxt}{代码清单 5.4 捕获可变参数包（在线代码见 @Wandbox）}
+#include <iostream>
+#include <memory>
+template<class First, class... Args>
+void captureTest(First&& first, Args&&... args) {
+const auto printer = [first = std::move(first),
+...capturedArgs = std::move(args)] {
+std::cout << first;
+((std::cout << ", " << capturedArgs), ...);
+std::cout << '\n';
+};
+printer();
+}
+int main() {
+auto ptr = std::make_unique<int>(10);
+captureTest(std::move(ptr), 2, 3, 4);
+captureTest(std::move(ptr), 'a', 'b');
+}
+\end{codeboxt}
+
+输出如下：
+
+\begin{codebox}
+0x1f0cb20, 2, 3, 4
+0, a, b
+\end{codebox}
+
+在例子中，我们用了一个 \texttt{printer} 对象，它与我们在 C++17 章节里写的代码类似，但这次我们捕获的是变量，而不是把它们作为 Lambda 实参转发过去。代码表明我们甚至可以传递一个 unique 指针。我们把它两次传入 Lambda，可以看到第二次时第二行输出为 \texttt{0}，因为该指针已经失去了对那块内存的所有权。
+
+\section{模板 Lambda}
+
+在 C++14 中，我们获得了泛型 Lambda，这意味着声明为 \texttt{auto} 的形参就是模板形参。
+
+以一个 Lambda 为例：
+
+\begin{codebox}
+[](auto x) { x; }
+\end{codebox}
+
+编译器生成的调用运算符对应于如下模板方法：
+
+\begin{codebox}
+template<typename T>
+void operator()(T x) { x; }
+\end{codebox}
+
+但此前没有办法修改这个模板形参、使用“真正的”模板实参。
+
+在 C++20 中，现在可以了。例如，我们怎样才能把 Lambda 限制为只接受某种类型的向量？我们可以写一个泛型 Lambda：
+
+\begin{codebox}
+auto foo = [](auto& vec) {
+std::cout<< std::size(vec) << '\n';
+std::cout<< vec.capacity() << '\n';
+};
+\end{codebox}
+
+但如果你用一个 \texttt{int} 实参去调用它（比如 \texttt{foo(10);}），可能会得到一个难以阅读的错误：
+
+\begin{codebox}
+prog.cc: In instantiation of
+'main()::<lambda(const auto:1&)> [with auto:1 = int]':
+prog.cc:16:11:
+required from here
+prog.cc:11:30: error: no matching function for call to 'size(const int&)'
+11 | std::cout<< std::size(vec) << '\n';
+\end{codebox}
+
+在 C++20 中，我们可以写成：
+
+\begin{codebox}
+auto foo = []<typename T>(std::vector<T> const& vec) {
+std::cout<< std::size(vec) << '\n';
+std::cout<< vec.capacity() << '\n';
+};
+\end{codebox}
+
+上面的 Lambda 对应一个模板化的调用运算符：
+
+\begin{codebox}
+template <typename T>
+void operator()(std::vector<T> const& s) { ... }
+\end{codebox}
+
+模板形参位于捕获子句 \texttt{[]} 之后。
+
+如果你用 \texttt{int} 去调用它（\texttt{foo(10);}），会得到一个更友好的提示：\texttt{note:}
+
+\begin{codebox}
+mismatched types 'const std::vector<T>' and 'int'
+\end{codebox}
+
+在 @Wandbox 上试玩这段代码\footnote{\url{https://wandbox.org/permlink/gupbJfUfHHQ2y48q}}。
+
+在上面的例子中，编译器能就 Lambda 接口的不匹配向我们发出警告。另一个重要方面是：在泛型 Lambda 的例子里，你只有一个变量，而没有它的模板类型。如果你想访问该类型，就必须使用 \texttt{decltype(x)}（针对形参为 \texttt{(auto x)} 的 Lambda）。这让代码变得更繁琐、更复杂。
+
+例如（代码摘自 P0428\footnote{\url{https://wg21.link/P0428}}）：
+
+从泛型实参推导
+
+\begin{codebox}
+auto f = [](auto const& x) {
+using T = std::decay_t<decltype(x)>;
+T copy = x;
+T::static_function();
+using Iterator = typename T::iterator;
+}
+\end{codebox}
+
+现在可以改写为：
+
+使用模板 Lambda
+
+\begin{codebox}
+auto f = []<typename T>(T const& x) {
+T copy = x;
+T::static_function();
+using Iterator = typename T::iterator;
+}
+\end{codebox}
+
+如上所示，在第一个例子中我们需要写：
+
+\begin{codebox}
+using T = std::decay_t<decltype(x)>;
+\end{codebox}
+
+才能得到输入实参的类型。而在 C++20 版本中，由于我们可以直接访问模板形参，就不再需要这样写了。
+
+另一个重要的用例是泛型可变参数 Lambda 中的完美转发：
+
+\begin{codebox}
+// C++17
+auto ForwardToTestFunc = [](auto&& ...args) {
+// args 的类型是什么？
+return TestFunc(std::forward<decltype(args)>(args)...);
+};
+\end{codebox}
+
+每次你想访问模板实参的类型时，都需要使用 \texttt{decltype()}，但用了模板 Lambda 之后就不需要了。如下所示：
+
+\begin{codebox}
+// C++20:
+auto ForwardToTestFunc = []<typename ...T>(T&& ...args) {
+return TestFunc(std::forward<T>(args)...); // 我们已经拥有全部类型！
+};
+\end{codebox}
+
+如你所见，模板 Lambda 提供了更清晰的语法，也更容易获取实参的类型。但还有更多！你甚至可以把概念用于 Lambda！详见下一节。
+
+\section{概念与 Lambda}
+
+概念（Concepts）是一种革命性的模板编写方式！它让你能够对模板形参施加约束，从而提升代码可读性、可能加快编译速度，并给出更好的错误信息。
+
+一个简单的例子：
+
+自定义概念声明
+
+\begin{codebox}
+// 定义一个概念：
+template <class T>
+concept SignedIntegral = std::is_integral_v<T> && std::is_signed_v<T>;
+// 使用：
+template <SignedIntegral T>
+void signedIntsOnly(T val) { }
+\end{codebox}
+
+在上面的代码中，我们首先创建了一个概念，用来描述那些有符号且为整型的类型。请注意，我们可以使用已有的类型特性。随后，我们用它来定义一个模板函数，该函数只支持符合该概念的类型。这里我们没有使用 \texttt{typename T}，而是直接引用概念的名字。
+
+好，但这和 Lambda 表达式有什么关系？关键在于精炼的语法以及受约束的 \texttt{auto} 模板形参。
+
+\textbf{简化与精炼语法}
+
+借助精炼的概念语法，你甚至可以不写 \texttt{template<typename..>} 部分就能写模板。
+
+使用不受约束的 \texttt{auto}：
+
+\begin{codebox}
+void myTemplateFunc(auto param) { }
+\end{codebox}
+
+或者使用受约束的 \texttt{auto}：
+
+\begin{codebox}
+void signedIntsOnly(SignedIntegral auto val) { }
+void floatsOnly(std::floating_point auto fp) { }
+\end{codebox}
+
+这种语法类似于你在 C++14 泛型 Lambda 里能用的写法，因为现在你也可以写成：
+
+\begin{codebox}
+void myTemplateFunction(auto val) { }
+\end{codebox}
+
+换句话说，对于 Lambda，我们可以借助这种精炼风格，例如对泛型 Lambda 的实参施加额外限制：
+
+\begin{codebox}
+auto GenLambda = [](SignedIntegral auto param) { return param * param + 1; };
+\end{codebox}
+
+如上面的例子所示，我用 \texttt{SignedIntegral} 概念约束了 \texttt{auto param}。整个表达甚至比我们在上一节讨论的模板 Lambda 更具可读性。
+
+下面是一个稍微复杂一点的例子，我们甚至可以为某个类接口定义一个概念：
+
+\texttt{IRenderable} 概念，配合 requires 关键字
+
+\begin{codebox}
+template <typename T>
+concept IRenderable = requires(T v) {
+{v.render()} -> std::same_as<void>;
+{v.getVertCount()} -> std::convertible_to<size_t>;
+};
+\end{codebox}
+
+在上面的例子中，我们定义了一个概念，它匹配所有带有 \texttt{render()} 和 \texttt{getVertCount()} 成员函数的类型。随后我们可以用它来写一个泛型 Lambda：
+
+\begin{codeboxt}{代码清单 5.5 IRenderable 概念/接口的实现（在线代码见 @Wandbox）}
+#include <concepts>
+#include <iostream>
+template <typename T>
+concept IRenderable = requires(T v) {
+{v.render()} -> std::same_as<void>;
+{v.getVertCount()} -> std::convertible_to<size_t>;
+};
+struct Circle {
+void render() { std::cout << "drawing circle\n"; }
+size_t getVertCount() const { return 10; };
+};
+struct Square {
+void render() { std::cout << "drawing square\n"; }
+size_t getVertCount() const { return 4; };
+};
+int main() {
+const auto RenderCaller = [](IRenderable auto &obj) {
+obj.render();
+};
+Circle c;
+RenderCaller(c);
+Square s;
+RenderCaller(s);
+}
+\end{codeboxt}
+
+在上面的例子中，\texttt{RenderCaller} 是一个泛型 Lambda，它可以支持满足 \texttt{IRenderable} 概念的类型。
+
+\section{无状态 Lambda 的改动}
+
+你可能记得，在讲解 C++11 的章节里提到过：Lambda 即使是无状态的，也不可默认构造。不过这一限制在 C++20 中被解除。因此，如果你的 Lambda 没有捕获任何东西，就可以写出如下代码：
+
+\begin{codeboxt}{代码清单 5.6 一个无状态 Lambda（在线代码见 @Wandbox）}
+#include <set>
+#include <string>
+#include <iostream>
+struct Product {
+std::string name;
+int id {0};
+double price { 0.0};
+};
+int main() {
+const auto nameCmp = [](const auto& a, const auto& b) {
+return a.name < b.name;
+};
+const std::set<Product, decltype(nameCmp)> prodSet {
+{"Cup", 10, 100.0}, {"Book", 2, 200.5 },
+{"TV set", 1, 2000 }, {"Pencil", 4, 10.5}
+};
+for (const auto &elem : prodSet)
+std::cout << elem.name << '\n';
+}
+\end{codeboxt}
+
+在前面的例子中，我声明了一个 \texttt{set}，用来存储一组 Product。我需要一种比较产品的方式，所以传入了一个无状态 Lambda，用来比较它们的字符串名称。例如，如果你用 C++17 的编译选项去编译这段代码，就会得到一个关于使用了被删除的默认构造函数的错误：
+
+\begin{codebox}
+stl_set.h: In constructor
+'std::set<_Key, _Compare, _Alloc>...
+[with _Key = Product;
+_Compare = main()::<lambda(const auto:1&, const auto:2&)>;
+...
+stl_set.h:244:29: error: use of deleted function
+'main()::<lambda(const auto:1&, const auto:2&)>::<lambda>()'
+\end{codebox}
+
+但在 C++20 中，你可以存储无状态 Lambda，甚至复制它们：
+
+\begin{codeboxt}{代码清单 5.7 存储一个无状态 Lambda（在线代码见 @Wandbox）}
+template <typename F>
+struct Product {
+int id {0};
+double price { 0.0};
+F predicate;
+};
+int main() {
+const auto idCmp = [](const auto& a) noexcept {
+return a.id != 0;
+};
+Product p { 10, 10.0, idCmp };
+[[maybe_unused]] auto p2 = p;
+}
+\end{codeboxt}
+
+\subsection{非求值上下文中的更多内容}
+
+还有一些与高级用例（如非求值上下文）相关的改动。结合默认可构造的 Lambda，你现在可以写出：
+
+\begin{codebox}
+std::map<int, int, decltype([](int x, int y) { return x > y; })> map;
+\end{codebox}
+
+如你所见，现在可以在 \texttt{map} 容器的声明中直接指定 Lambda。它可以作为一种可调用比较类型来使用。这类“非求值上下文”在高级模板元编程中尤其方便。例如，在该特性的提案中，作者提到了在编译期用 Lambda 作为谓词对元组对象进行排序。
+
+更多论证参见 P0315R2\footnote{\url{https://wg21.link/P0315R2}}。
+
+\section{Lambda 与 constexpr 算法}
+
+如果你记得上一章的内容，就会知道从 C++17 起我们就可以使用 \texttt{constexpr} 的 Lambda。借助这一功能，你可以把一个 Lambda 传给那些在编译期求值的函数。在 C++20 中，标准库中的大部分算法现在都标记了 \texttt{constexpr} 关键字，这使得 \texttt{constexpr} Lambda 更加方便！我们来看几个例子。
+
+下面是一段代码，它在数组上运行 \texttt{std::accumulate}，并使用了自定义的 Lambda：
+
+\begin{codeboxt}{代码清单 5.8 将自定义 constexpr Lambda 用于 std::accumulate（在线代码见 @Compiler Explorer）}
+#include <array>
+#include <numeric>
+int main() {
+constexpr std::array arr{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+// 使用 constexpr lambda
+static_assert(std::accumulate(begin(arr), end(arr), 0,
+[](auto a, auto b) noexcept {
+return a + b;
+}) == 55);
+return arr[0];
+}
+\end{codeboxt}
+
+在 \texttt{std::accumulate} 的例子中，我们使用的 Lambda 实际上就是 \texttt{std::plus} 运算。而在下一个例子中，有一个 \texttt{constexpr} 函数，它为 \texttt{count\_if} 算法接收一个 \texttt{cmp} 比较器/谓词：
+
+\begin{codeboxt}{代码清单 5.9 将 constexpr Lambda 传递给自定义函数（在线代码见 @Compiler Explorer）}
+#include <array>
+#include <algorithm>
+constexpr auto CountValues(auto container, auto cmp) {
+return std::count_if(begin(container), end(container), cmp);
+}
+int main() {
+constexpr auto minVal = CountValues(std::array{-10, 6, 8, 4, -5, 2, 4, 6 },
+[](auto a) { return a >= 0; }
+);
+return minVal;
+}
+\end{codeboxt}
+
+
+哪些标准算法被标记为 \texttt{constexpr}？\texttt{<algorithm>}、\texttt{<utility>} 和 \texttt{<numeric>} 头文件里的所有算法现在都加上了 \texttt{constexpr}，例外的是 \texttt{shuffle}、\texttt{sample}、\texttt{stable\_sort}、\texttt{stable\_partition}、\texttt{inplace\_merge} 这些函数，以及那些接受 Execution Policy 实参的函数或重载。更多内容参见论文 P0202\footnote{\url{https://wg21.link/p0202}}、P0879\footnote{\url{https://wg21.link/P0879}} 和 P1645\footnote{\url{https://wg21.link/P1645}}。
+
+\section{C++20 对重载模式的更新}
+
+在上一章中，你学习了从多个 Lambda 表达式派生、并通过 \texttt{overloaded} 模式把它们暴露出来的做法。这种技巧在处理 \texttt{std::variant} 的访问（visitation）时非常方便。
+
+得益于 C++20 中对类模板实参推导（CTAD）的更新，我们现在可以写出更简短的语法！为什么？因为在 C++20 中，CTAD 得到了扩展，聚合类型会被自动处理。这意味着不再需要编写自定义的推导指引。
+
+以一个简单类型为例：
+
+\begin{codebox}
+template <typename T, typename U, typename V>
+struct Triple { T t; U u; V v; };
+\end{codebox}
+
+在 C++20 中，你可以写成：
+
+\begin{codebox}
+Triple ttt{ 10.0f, 90, std::string{"hello"}};
+\end{codebox}
+
+此时 \texttt{T} 会被推导为 \texttt{float}，\texttt{U} 为 \texttt{int}，\texttt{V} 为 \texttt{std::string}。
+
+在 C++20 中，\texttt{overloaded} 模式现在只需写成：
+
+\begin{codebox}
+template<class... Ts> struct overload : Ts... { using Ts::operator()...; };
+\end{codebox}
+
+关于这一特性的提案可见 P1021\footnote{\url{https://wg21.link/P1021}}，以及 P1816\footnote{\url{https://wg21.link/P1816}}（措辞部分）。
+
+
+GCC 10 似乎实现了这一提案，但在涉及继承的高级用例中尚不能工作，因此我们还需等待其达到完全一致性。
+
+\section{小结}
+
+在本章中，我们回顾了 C++20 带来的变更。首先，有一些澄清与改进：例如 \texttt{this} 的捕获、对结构化绑定的捕获，以及默认构造无状态 Lambda 的能力。此外，还有更重大的新增特性！如今一个突出的能力是模板 Lambda 与概念——这让你可以对泛型 Lambda 施加更强的控制。总而言之，有了 C++20 及其全部特性，Lambda 成为了更加强大的工具！

@@ -1,0 +1,968 @@
+\section{Lambda 语法更新}
+
+在 C++17 中，Lambda 表达式的语法有了一些变动：
+
+\begin{itemize}
+\item 现在你可以在形参列表之后添加 \texttt{constexpr}。
+\item 动态异常说明在 C++11 中已被弃用，并在 C++17 中移除，因此在实践中，你应该只使用 \texttt{noexcept}。
+\end{itemize}
+
+请看下面的更新图示：
+
+\myGraphic{0.8}{images/fig_p094_1.png}{C++17 中的 Lambda 语法}
+
+你可以在下一节中阅读关于这一新改动的内容。
+
+\section{类型系统中的异常说明}
+
+在讨论 Lambda 的语法改进之前，我们需要先介绍 C++17 引入的一个“一般”语言特性。
+
+函数的异常说明过去并不属于函数的类型，但在 C++17 中，它已成为函数类型的一部分。这意味着你可以拥有两个函数重载：一个带 \texttt{noexcept}，另一个不带。如下所示：
+
+\begin{codeboxt}{代码清单 4.1 类型系统中的异常说明（在线代码见 @Wandbox）}
+using TNoexceptVoidFunc = void (*)() noexcept;
+void SimpleNoexceptCall(TNoexceptVoidFunc f) { f(); }
+using TVoidFunc = void (*)();
+void SimpleCall(TVoidFunc f) { f(); }
+void fNoexcept() noexcept { }
+void fRegular() { }
+int main() {
+SimpleNoexceptCall(fNoexcept);
+SimpleNoexceptCall([]() noexcept { });
+// SimpleNoexceptCall(fRegular);
+// 无法转换
+// SimpleNoexceptCall([]() { });
+// 无法转换
+SimpleCall(fNoexcept); // 转换为普通函数
+SimpleCall(fRegular);
+SimpleCall([]() noexcept { });
+// 转换
+SimpleCall([]() { });
+}
+\end{codeboxt}
+
+指向 \texttt{noexcept} 函数的指针可以转换为指向普通函数的指针（这也适用于指向成员函数的指针，同样适用于 Lambda 表达式）。但反向则不行（不能从普通函数指针转换为标记为 \texttt{noexcept} 的函数指针）。
+
+添加该特性的原因之一是有机会更好地优化代码。如果编译器能保证某个函数不会抛出异常，那么它就有可能生成更快的代码（参见 Why can noexcept generate faster code than throw()? @Standard C++\footnote{\url{https://isocpp.org/blog/2014/09/noexcept-optimization}}）。在标准库内部，有很多地方会检查 \texttt{noexcept}，并据此使代码更高效。\texttt{std::vector} 就是这样工作的，它可以区分所存储的类型能否在不抛出异常的情况下移动。
+
+下面是一个使用类型特性和 \texttt{if constexpr} 来检查给定可调用对象是否标记为 \texttt{noexcept} 的示例：
+
+\begin{codebox}
+#include <iostream>
+#include <type_traits>
+template<typename Callable>
+void CallWith10(Callable&& fn) {
+if constexpr (std::is_nothrow_invocable_v<Callable, int>) {
+std::cout << "Calling fn(10) with optimisation\n";
+fn(10);
+}
+else {
+std::cout << "Calling fn(10) normally\n";
+fn(10);
+}
+}
+int main() {
+int x {10};
+const auto lam = [&x](int y) noexcept { x += y; };
+CallWith10(lam);
+const auto lamEx = [&x](int y) {
+std::cout << "lamEx with x = " << x << '\n';
+x += y;
+};
+CallWith10(lamEx);
+}
+\end{codebox}
+
+输出：
+
+\begin{codebox}
+Calling fn(10) with optimisation
+Calling fn(10) normally
+lamEx with x = 20
+\end{codebox}
+
+该代码使用 \texttt{std::is\_nothrow\_invocable\_v} 来检查给定的可调用对象是否标记为 \texttt{noexcept}。
+
+
+在 C++17 中，异常说明得到了清理。实际上，你只能使用 \texttt{noexcept} 来声明某个函数不会抛出异常。动态异常说明，即 \texttt{throw(X, Y, Z)}，现在已被移除。
+
+
+快速提问：如果你将一个函数标记为 \texttt{noexcept}，但它却抛出了异常，会发生什么？在这种情况下，编译器会调用 \texttt{std::terminate}。
+
+\section{constexpr Lambda 表达式}
+
+自 C++11 起，\texttt{constexpr} 已经让越来越多的代码能够在编译期求值。这不仅影响性能，更重要的是让编译期编程变得更加愉快和强大。在 C++17 中，这个强大的关键字也可以应用于 Lambda 表达式。我们来看看规范 expr.prim.lambda \#4\footnote{\url{https://timsong-cpp.github.io/cppwp/n4659/expr.prim.lambda\#closure-4}}：
+
+函数调用运算符是一个 \texttt{constexpr} 函数，如果相应的 Lambda 表达式的形参声明子句后面带有 \texttt{constexpr}，或者它满足 \texttt{constexpr} 函数的要求。
+
+换句话说，如果 Lambda 函数体遵循 \texttt{constexpr} 函数的规则，那么闭包类型的 \texttt{operator()} 会被隐式定义为 \texttt{constexpr}。回顾一下，在 C++17 中，\texttt{constexpr} 函数有以下规则 n4659/dcl.constexpr\#3\footnote{\url{https://timsong-cpp.github.io/cppwp/n4659/dcl.constexpr\#3}}：
+
+\begin{itemize}
+\item 它不能是虚函数；
+\item 它的返回类型必须是一个字面量类型；
+\item 它的每个形参类型必须是一个字面量类型；
+\item 它的函数体必须是 \texttt{= delete}、\texttt{= default}，或者一个不包含以下内容的复合语句：
+  \begin{itemize}
+  \item 一个 \texttt{asm} 定义，
+  \item 一个 \texttt{goto} 语句，
+  \item 一个标识符标签，
+  \item 一个 try 块，或
+  \item 一个非字面量类型的变量定义，或者具有静态或线程存储期、或没有执行初始化的变量的定义。
+  \end{itemize}
+\end{itemize}
+
+例如：
+
+\begin{codebox}
+constexpr auto Square = [](int n) { return n * n; }; // 隐式 constexpr
+static_assert(Square(2) == 4);
+\end{codebox}
+
+由于 \texttt{Square} 的函数体很简单，并且没有违反 \texttt{constexpr} 规则，因此它被隐式标记为 \texttt{constexpr}，我们可以在编译期用 \texttt{static\_assert} 调用它。
+
+\subsection{示例}
+
+来看一些更实用的代码示例怎么样？首先，我们考虑一个流行的数值算法的实现：
+
+\begin{codeboxt}{代码清单 4.3 constexpr Lambda - 简单累加（在线代码见 @Wandbox）}
+#include <array>
+template<typename Range, typename Func, typename T>
+constexpr T SimpleAccumulate(Range&& range, Func func, T init) {
+for (auto &&elem: range) {
+init += func(elem);
+}
+return init;
+}
+int main() {
+constexpr std::array arr{ 1, 2, 3 };
+constexpr auto sum = SimpleAccumulate(arr, [](auto i) {
+return i * i;
+}, 0);
+static_assert(sum == 14);
+}
+\end{codeboxt}
+
+该代码使用了一个传递给 \texttt{SimpleAccumulate} 的 \texttt{constexpr} Lambda 表达式。该 Lambda 表达式没有被显式标记为 \texttt{constexpr}，但其函数体只包含一个简单的计算，因此编译器会将其调用运算符声明为 \texttt{constexpr}。该算法还使用了一些 C++17 的元素：\texttt{std::array}、\texttt{std::begin} 和 \texttt{std::end}（用于基于范围的 for 循环）现在也支持 \texttt{constexpr}，这意味着整个代码都可能在编译期执行。
+
+作为另一个例子，我们可以使用并增强 C++14 章节（第 73 页）中的一个递归 Lambda 表达式：
+
+\begin{codeboxt}{代码清单 4.4 递归 constexpr Lambda（在线代码见 @Compiler Explorer）}
+int main() {
+constexpr auto factorial = [](int n) {
+constexpr auto fact_impl = [](int n, const auto& impl) -> int {
+return n > 1 ? n * impl(n - 1, impl) : 1;
+};
+return fact_impl(n, fact_impl);
+};
+static_assert(factorial(5) == 120);
+}
+\end{codeboxt}
+
+在该示例中，我们将 \texttt{factorial} 标记为 \texttt{constexpr}，这使得我们可以通过 \texttt{static\_assert} 来检查计算结果。去看看 Compiler Explorer 上的在线代码，查看生成的汇编代码——即使在关闭优化级别的情况下，它几乎也是一个“空操作”。
+
+\subsection{捕获变量}
+
+你也可以捕获变量（假设它们同时也是常量表达式）：
+
+\begin{codeboxt}{代码清单 4.5 捕获一个 constexpr 变量（在线代码见 @Wandbox）}
+constexpr int add(int const& t, int const& u) { return t + u; }
+int main() {
+constexpr int x = 0;
+constexpr auto lam = [x](int n) { return add(x, n); };
+static_assert(lam(10) == 10);
+}
+\end{codeboxt}
+
+然而，有一种有趣的情况：你不再进一步“传递”所捕获的变量，例如：
+
+\begin{codebox}
+constexpr int x = 0;
+constexpr auto lam = [x](int n) { return n + x; };
+\end{codebox}
+
+在这种情况下，在 Clang 中，我们可能会得到如下警告：
+
+\begin{codebox}
+warning: lambda capture 'x' is not required to be captured for this use
+\end{codebox}
+
+当我们把 \texttt{add()} 的实现改为按值接收实参时，也会发生同样的情况：
+
+\begin{codebox}
+constexpr int add(int t, int u) { return t + u; }
+\end{codebox}
+
+这是因为，如果我们依赖常量表达式，编译器就可以把变量优化掉，尤其是对于那些在编译期就知道其值的内建类型。
+
+下面是来自 cppreference\footnote{\url{https://en.cppreference.com/w/cpp/language/lambda}} 的一些额外说明：
+
+Lambda 表达式可以在不捕获变量的情况下读取其值，前提是该变量：
+
+\begin{itemize}
+\item 具有 const 非 volatile 的整数或枚举类型，并且已用一个常量表达式初始化，或
+\item 是 constexpr 且没有任何 mutable 成员。
+\end{itemize}
+
+欲了解更多信息，你还可以阅读标准中的这一部分：C++ draft - basic.def.odr\#4\footnote{\url{https://eel.is/c++draft/basic.def.odr\#4}}。
+
+在第一个 \texttt{add()} 示例中，它以引用方式接收变量，我们强制编译器创建一个可以随后绑定到该引用的闭包成员。设想 \texttt{add()} 函数返回实参的地址，然后将其与 x 进行比较，如下所示：
+
+\begin{codebox}
+int const* address(int const& x) {
+return &x;
+}
+auto f = [x] {
+auto* p = address(x);
+return p == &x; // 这些必须为真
+};
+\end{codebox}
+
+因此，编译器需要在闭包内部存储 \texttt{x} 的副本——即捕获它。在这种情况下，该捕获无法被优化掉。
+
+\subsection{constexpr 小结}
+
+简而言之：
+
+\texttt{constexpr} Lambda 表达式让你能够与模板编程相融合，并可能写出更简短的代码。
+
+
+为未来做好准备：
+
+在 C++20 中，我们将拥有大量 \texttt{constexpr} 标准算法和容器，例如 \texttt{std::vector} 和 \texttt{std::string}，因此 \texttt{constexpr} Lambda 表达式在那个场景下会非常有用。你的代码在运行时版本和 \texttt{constexpr}（编译期）版本中将看起来一模一样！
+
+现在让我们转到自 C++17 起可用的第二个重要特性：
+
+\section{捕获 *this}
+
+你还记得当我们想要捕获一个类成员\footnote{参见 C++11 章节——“捕获类成员”，见第 31 页。} 时遇到的问题吗？
+
+默认情况下，我们捕获 \texttt{this}（作为一个指针！），这就是为什么当临时对象离开作用域时，我们可能会陷入麻烦。
+
+在 C++17 中，我们有了另一种方式。我们可以捕获 \texttt{*this} 的一个副本\footnote{要捕获 *this，该类必须是可复制的。你不能使用 *this 来捕获一个仅可移动的类。}：
+
+\begin{codeboxt}{代码清单 4.6 捕获 *this（在线代码见 @Wandbox）}
+#include <iostream>
+struct Baz {
+auto foo() {
+return [*this] { std::cout << s << '\n'; };
+}
+std::string s;
+};
+int main() {
+const auto f1 = Baz{"xyz"}.foo();
+const auto f2 = Baz{"abc"}.foo();
+f1();
+f2();
+}
+\end{codeboxt}
+
+在该示例中，我们现在可以写 \texttt{[*this]}，这意味着 Lambda 表达式捕获了该临时对象的一个副本，即 \texttt{*this} 的一个副本。该副本随后被保存在闭包对象中，这样在稍后调用该 Lambda 表达式时就不会有任何未定义行为了。
+
+
+请注意，在 C++17 中，如果你在成员函数中写 \texttt{[=]}，那么 \texttt{this} 会被隐式捕获！去看看 C++20 章节，了解这一点是如何被增强和弃用的！参见 P0806\footnote{\url{https://wg21.link/P0806}}。
+
+\subsection{一些准则}
+
+那么，我们应该捕获 \texttt{[this]} 还是 \texttt{[*this]}，以及为什么这很重要？
+
+在大多数情况下，当你在类的内部作用域中工作时，\texttt{[this]}（或 \texttt{[\&]}）是完全没问题的。没有额外的副本，这在你的对象很大时至关重要。
+
+当你确实想要一个副本，并且 Lambda 表达式有可能比对象存活得更久时，你可能会考虑使用 \texttt{[*this]}。
+
+这对于避免在异步或并行执行中的数据竞争可能至关重要。此外，在异步/多线程执行模式下，Lambda 表达式可能比对象存活得更久，而那时 \texttt{this} 指针可能已不再有效。
+
+\section{IIFE 的更新}
+
+在关于 C++11 变更的章节中，第 42 页，你了解了 IIFE——立即调用的函数表达式（Immediately Invoked Functional Expression）。在 C++17 中，这一技巧有了更新。
+
+IIFE 的问题之一是，它有时难以阅读，因为调用语法在读代码时很容易被忽略：
+
+\begin{codebox}
+const auto var = [&] {
+if (TheFirstCondition())
+return one_value;
+if (TheSecondCondition())
+return second_val;
+return default_value;
+}(); // 调用它！
+\end{codebox}
+
+在 C++11 章节中，我们甚至讨论过这样一种情况：使用 \texttt{const auto var} 可能也会有点令人误解。这是因为开发者可能习惯性地认为 \texttt{var} 可能是一个闭包对象，而不是调用的结果。
+
+在 C++17 中，有一个方便的模板函数 \texttt{std::invoke()}，它可以让 IIFE 更加显眼：
+
+\begin{codebox}
+const auto var = std::invoke([&] {
+if (TheFirstCondition())
+return one_value;
+if (TheSecondCindition())
+return second_val;
+return default_value;
+});
+\end{codebox}
+
+如你所见，无需在表达式末尾写 \texttt{()}，而且现在可以清楚地看出代码是在调用某个东西。
+
+下面是另一个例子：
+
+\begin{codeboxt}{代码清单 4.7 std::invoke 示例（在线代码见 @Wandbox）}
+#include <functional> // invoke()
+#include <iostream>
+#include <string>
+int main() {
+const std::string in { "Hello World" };
+const std::string out = std::invoke([copy = in]() mutable {
+copy.replace(copy.find("World"), 5, "C++");
+return copy;
+});
+std::cout << out;
+}
+\end{codeboxt}
+
+上面，我们复制了 \texttt{in} 字符串，然后将“World”替换为“C++”。多亏了 IIFE，我们可以将计算出的值赋给一个 \texttt{const} 对象。
+
+你可以在我的博客文章 C++20 Ranges、Projections、std::invoke 与 if constexpr @C++ Stories\footnote{\url{https://www.fluentcpp.com/2020/11/13/how-lambdas-make-function-extraction-safer/}}\footnote{\url{https://www.fluentcpp.com/2020/11/13/how-lambdas-make-function-extraction-safer/}} 中阅读更多关于 \texttt{std::invoke} 的内容。
+
+\section{用 IIFE 提取函数}
+
+还有一种有趣的技术，得益于 Lambda 表达式和 IIFE，你可以使用它将代码提取为更小的函数，并确保它是安全的且能够编译！
+
+
+这一技巧源自 Jai 语言\footnote{\url{https://www.fluentcpp.com/2020/11/13/how-lambdas-make-function-extraction-safer/}} 的一篇教程，由 Ezra（又名 eracpp）通过 CppCon 2019 的一场闪电演讲\footnote{\url{https://www.fluentcpp.com/2020/11/13/how-lambdas-make-function-extraction-safer/}} 在 C++ 程序员中改编并推广开来。Jonathan Boccara 也在他的 Fluent C++ 博客文章《How Lambdas Make Function Extraction Safer》\footnote{\url{https://www.fluentcpp.com/2020/11/13/how-lambdas-make-function-extraction-safer/}} 中描述了这一技巧。
+
+假设你有一段很长的代码块，需要将其提取为一些更小的函数。以下是核心步骤：
+
+\begin{enumerate}
+\item 用 IIFE 包裹你想要提取的代码，并以引用方式捕获所有变量 \texttt{[\&]}。
+\item 编译代码。编译器会抱怨 IIFE 内部、但外部不可见的变量。这些变量将是 IIFE 的输出（返回值）。
+\item 现在移除“以引用方式捕获所有变量”并编译。编译器会报告那些我们需要作为形参传入 Lambda 表达式的变量。
+\item 为新函数起一个名字，并从 IIFE 中复制代码。
+\end{enumerate}
+
+下面是一个该技巧的简短示例。让我们从以下代码开始：
+
+\begin{codeboxt}{代码清单 4.8 学生成绩（在线代码见 @Wandbox）}
+#include <numeric>
+#include <iostream>
+#include <vector>
+int main() {
+using Student = std::pair<std::vector<double>, std::string>;
+const std::vector<Student> db { { { 5.0, 5.0, 5.0, 4.0 }, "John" },
+{ { 5.0, 5.0, 5.0, 4.0 }, "Mark" },
+{ { 5.0, 5.0, 5.0, 4.0 }, "Jane" } };
+std::vector<std::pair<double, std::string>> averages;
+for (auto& [marks, name] : db) {
+double avg = std::accumulate(marks.begin(),
+marks.end(), 0.0)/marks.size();
+averages.push_back({avg, name});
+}
+for (const auto &[avg, name] : averages)
+std::cout << name << ": " << avg << '\n';
+}
+\end{codeboxt}
+
+我们想要提取计算平均分的部分，所以让我们把代码包裹在 IIFE 中：
+
+\begin{codebox}
+[&]() {
+std::vector<std::pair<double, std::string>> averages;
+for (auto& [marks, name] : db) {
+double avg = std::accumulate(marks.begin(),
+marks.end(), 0.0)/marks.size();
+averages.push_back({avg, name});
+}
+}();
+\end{codebox}
+
+当我们编译这个时，会得到一个错误：
+
+\begin{codebox}
+error: 'averages' was not declared in this scope
+\end{codebox}
+
+这意味着 \texttt{averages} 是 Lambda 表达式的输出，我们应该返回它：
+
+\begin{codebox}
+auto averages = [&]() {
+std::vector<std::pair<double, std::string>> out;
+// 计算……
+return out;
+}();
+\end{codebox}
+
+现在我们必须移除 \texttt{[\&]}，看看哪些是输入。对于我们的情况很简单——我们需要 \texttt{db}。所以我们可以把它作为 Lambda 表达式的输入形参：
+
+\begin{codebox}
+auto averages = [](const std::vector<Student>& db) {
+// << 形参
+// 其余代码相同……
+}(db); // << 传入形参
+\end{codebox}
+
+作为最后一步，我们现在可以取出代码并准备最终的函数：
+
+\begin{codebox}
+auto ComputeAverages(const std::vector<Student>& db) {
+std::vector<std::pair<double, std::string>> out;
+// 计算……
+return out;
+}
+\end{codebox}
+
+并调用它：
+
+\begin{codebox}
+auto averages = ComputeAverages(db);
+for (const auto &[avg, name] : averages)
+std::cout << name << ": " << avg << '\n';
+\end{codebox}
+
+这一技巧确保了过程是安全的，并且不会遗漏提取出的函数的正确输入和输出。此外，借助提取出的函数，你会发现代码甚至可以更好，例如我们可以使用其他一些算法（如 \texttt{std::transform}）而不是原始循环。不过我们就把这个留作练习吧。
+
+\section{Updates to Variadic Generic Lambdas 可变参数泛型 Lambda 的更新}
+
+在 C++14 一章的第 62 页，我们讨论过可以和泛型 Lambda 一起使用的可变参数列表。借助 C++17 中的折叠表达式，我们可以写出更加紧凑的代码。下面是经过转换的求和示例：
+
+\begin{codeboxt}{代码清单 4.9 用折叠表达式求和（在线代码见 @Wandbox）}
+#include <iostream>
+int main() {
+const auto sumLambda = [] (auto... args) {
+std::cout << "sum of: " << sizeof...(args) << " numbers\n";
+return (args + ... + 0);
+};
+std::cout << sumLambda(1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8, 9.9 );
+}
+\end{codeboxt}
+
+如果把它和之前 C++14 的那个示例相比，你会立刻注意到：不再需要递归了！折叠表达式为编写组合可变参数的表达式提供了简单且相对直观的语法。
+
+下面是另一个用于可变参数打印工具的示例：
+
+\begin{codeboxt}{代码清单 4.10 用折叠表达式实现的简单打印器（在线代码见 @Wandbox）}
+#include <iostream>
+int main() {
+const auto printer = [] (auto... args) {
+(std::cout << ... << args) << '\n';
+};
+printer(1, 2, 3, "hello", 10.5f);
+}
+\end{codeboxt}
+
+不过，如果你运行这段代码，它会把所有实参打印在一起，中间没有任何分隔符：
+
+\begin{codebox}
+123hello10.5
+\end{codebox}
+
+为了解决这个问题，我们可以引入一个小小的辅助 Lambda，并且对逗号运算符进行折叠，而不是对 \texttt{<<} 进行折叠：
+
+\begin{codeboxt}{代码清单 4.11 带内部辅助 Lambda 的打印器（在线代码见 @Wandbox）}
+#include <iostream>
+int main() {
+const auto printer = [] (auto... args) {
+const auto printElem = [](auto elem) {
+std::cout << elem << ", ";
+};
+(printElem(args), ...);
+std::cout << '\n';
+};
+printer(1, 2, 3, "hello", 10.5f);
+}
+\end{codeboxt}
+
+现在我们得到如下输出：
+
+\begin{codebox}
+1, 2, 3, hello, 10.5,
+\end{codebox}
+
+这还能进一步简写为：
+
+\begin{codebox}
+const auto printer = [] (auto... args) {
+((std::cout << args << ", "), ...);
+std::cout << '\n';
+};
+\end{codebox}
+
+如果我们不想在打印序列的末尾显示最后一个逗号，可以这样做：
+
+\begin{codeboxt}{代码清单 4.12 打印元素但不带最后的那个分隔符（在线代码见 @Wandbox）}
+#include <iostream>
+int main() {
+const auto printer = [] (auto first, auto... args) {
+std::cout << first;
+((std::cout << ", " << args), ...);
+std::cout << '\n';
+};
+printer(1, 2, 3, "hello", 10.5f);
+}
+\end{codeboxt}
+
+这一次，我们需要为第一个元素使用泛型模板实参，其余的则使用可变参数列表。这样我们可以先打印第一个元素，再在其余元素前面加上逗号。代码现在会打印：
+
+\begin{codebox}
+1, 2, 3, hello, 10.5
+\end{codebox}
+
+\section{Deriving from Multiple Lambdas 从多个 Lambda 派生}
+
+在 C++11 一章中，你学习了从 Lambda 表达式派生。虽然看到这种技巧很有意思，但它的用武之地相当有限。
+
+这种方法的主要问题，在于它只能支持固定数量的 Lambda。
+
+前面的示例只用了一到两个基类。但如果使用可变数量的基类，也就是可变数量的 Lambda，会怎样呢？
+
+在 C++17 中，我们就有了一个方便的模式来实现这一点！
+
+请看：
+
+\begin{codebox}
+template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
+template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
+\end{codebox}
+
+如你所见，我们需要使用可变参数模板，因为它允许我们指定可变数量的基类。
+
+下面是一个使用该代码的简单示例：
+
+\begin{codeboxt}{代码清单 4.13 重载模式（在线代码见 @Compiler Explorer）}
+#include <iostream>
+template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
+template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
+int main() {
+const auto test = overloaded{
+[](const int& i) { std::cout << "int: " << i << '\n'; },
+[](const float& f) { std::cout << "float: " << f << '\n'; },
+[](const std::string& s) { std::cout << "string: " << s << '\n'; }
+};
+test("10.0f");
+}
+\end{codeboxt}
+
+在上面的示例中，我们创建了一个由三个 Lambda 组成的 \texttt{test} 对象。随后我们可以带着一个实参调用该对象，而正确的 Lambda 会根据输入实参的类型被选中。
+
+现在让我们更仔细地看看这个模式的核心部分。
+
+那两行代码得益于自 C++17 起可用的三个特性：
+
+\begin{itemize}
+\item 在 \texttt{using} 声明中的包展开 —— 配合可变参数模板的简短而紧凑的语法。
+\item 自定义模板实参推导规则 —— 它可以将一组 Lambda 对象转换为 \texttt{overloaded} 类的基类列表。（注：在 C++20 中不再需要！）
+\item 对聚合初始化的扩展 —— 在 C++17 之前，你无法对派生自其他类型的类型进行聚合初始化。
+\end{itemize}
+
+在 C++11 一章中，我们已经介绍过 \texttt{using} 声明的必要性。这对于把各个调用运算符引入 \texttt{overloaded} 结构的同一作用域至关重要。在 C++17 中，我们获得了对可变参数模板支持的语法，而这在语言之前的修订版本中是不可能做到的。
+
+现在让我们试着理解剩下的两个特性：
+
+\subsection{Custom Template Argument Deduction Rules 自定义模板实参推导规则}
+
+我们从 Lambda 派生，然后像上一节看到的那样暴露它们的 \texttt{operator()}。但是，我们要如何创建这种 \texttt{overload} 类型的对象呢？
+
+如你所知，我们无法预先知道 Lambda 的类型，因为编译器必须为每一个 Lambda 生成某个唯一的类型名。例如，我们不能简单地写成：
+
+\begin{codebox}
+overload<LambdaType1, LambdaType2> myOverload { ... } // ？？？
+// LambdaType1 和 LambdaType2 是什么 ？？
+\end{codebox}
+
+唯一可行的办法是使用某个 \texttt{make} 函数（因为模板实参推导对函数模板来说一直都有效）：
+
+\begin{codebox}
+template <typename... T>
+constexpr auto make_overloader(T&&... t) {
+return overloaded<T...>{std::forward<T>(t)...};
+}
+\end{codebox}
+
+借助 C++17 加入的模板实参推导规则，我们可以简化常见模板类型的创建，并且不再需要 \texttt{make\_overloader} 函数。
+
+例如，对于简单类型，我们可以写成：
+
+\begin{codebox}
+std::pair strDouble { std::string{"Hello"}, 10.0 };
+// strDouble 的类型是 std::pair<std::string, double>
+\end{codebox}
+
+我们还可以定义自定义的推导指引。标准库大量使用了它们，例如对于 \texttt{std::array}：
+
+\begin{codebox}
+template <class T, class... U>
+array(T, U...) -> array<T, 1 + sizeof...(U)>;
+\end{codebox}
+
+而上面的规则让我们可以写成：
+
+\begin{codebox}
+array test{1, 2, 3, 4, 5};
+// test 的类型是 std::array<int, 5>
+\end{codebox}
+
+对于 \texttt{overloaded} 模式，我们可以指定一个自定义的推导指引：
+
+\begin{codebox}
+template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
+\end{codebox}
+
+现在，当我们用两个 Lambda 初始化一个 overload 时：
+
+\begin{codebox}
+overloaded myOverload { [](int) { }, [](double) { } };
+\end{codebox}
+
+针对 \texttt{overload} 的模板实参会被正确推导。在我们的例子中，编译器知道这两个 Lambda 的类型，因此能够解析出 overload 所继承自的类型。
+
+
+请查看 C++20 一章第 125 页的「更新」小节，因为在新的标准中，类模板实参推导得到了改进！对于重载模式来说，这意味着我们不必再编写自定义的推导指引了！
+
+现在让我们来看这个拼图中最后缺失的部分 —— 聚合初始化。
+
+\subsection{Extension to Aggregate Initialisation 对聚合初始化的扩展}
+
+这个功能相对直白：我们现在可以对派生自其他类型的类型进行聚合初始化。根据规范 dcl.init.aggr\footnote{⁵https://timsong-cpp.github.io/cppwp/n4659/dcl.init.aggr}⁵：聚合体是数组，或是满足以下条件的类：
+
+\begin{itemize}
+\item 没有用户提供的、显式的或继承来的构造函数；
+\item 没有私有的或受保护的非静态数据成员；
+\item 没有虚函数，且；
+\item 没有虚的、私有的或受保护的基类。
+\end{itemize}
+
+例如（规范草案中的示例）：
+
+聚合初始化
+
+\begin{codebox}
+struct base1 { int b1, b2 = 32; };
+struct base2 {
+base2() { b3 = 64; }
+int b3;
+};
+struct derived : base1, base2 {
+int d;
+};
+derived d1{{1, 2}, {}, 4};
+derived d2{{}, {}, 4};
+\end{codebox}
+
+这段代码用 \texttt{1} 初始化了 \texttt{d1.b1}，用 \texttt{2} 初始化 \texttt{d1.b2}，用 \texttt{64} 初始化 \texttt{d1.b3}，用 \texttt{4} 初始化 \texttt{d1.d}。而对于第二个对象，则是：用 \texttt{0} 初始化 \texttt{d2.b1}，用 \texttt{32} 初始化 \texttt{d2.b2}，用 \texttt{64} 初始化 \texttt{d2.b3}，用 \texttt{4} 初始化 \texttt{d2.d}。
+
+在我们的场景中，它的影响更为显著。因为对于 overload 类来说，如果没有聚合初始化，我们就得实现下面这样的构造函数：
+
+\begin{codebox}
+struct overloaded : Fs... {
+template <class ...Ts>
+overloaded(Ts&& ...ts) : Fs{std::forward<Ts>(ts)}...
+{}
+// ...
+}
+\end{codebox}
+
+要写不少代码，而且它可能还无法覆盖像 \texttt{noexcept} 这样的所有情况。
+
+有了聚合初始化，我们就「直接」从基类列表中调用 Lambda 的构造函数，因此无需再显式地编写它并向其转发实参。
+
+好了，我们讲了很多，但重载模式有没有什么实用的例子呢？
+
+它似乎可以很方便地用于 \texttt{std::variant} 的访问（visitation）。
+
+关于 std::variant 与 std::visit 的示例
+
+具备了这些知识，我们就可以把继承和重载模式用于更实际的用途。来看一个访问 \texttt{std::variant} 的示例：
+
+\begin{codeboxt}{代码清单 4.14 配合 variant 与 visit 的重载模式（在线代码见 @Compiler Explorer）}
+#include <iostream>
+#include <variant>
+template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
+template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
+int main() {
+const auto PrintVisitor = [](const auto& t) { std::cout << t << "\n"; };
+std::variant<int, float, std::string> intFloatString { "Hello" };
+std::visit(PrintVisitor, intFloatString);
+std::visit(overloaded{
+[](int& i) { i *= 2; },
+[](float& f) { f *= 2.0f; },
+[](std::string& s) { s = s + s; }
+}, intFloatString);
+std::visit(PrintVisitor, intFloatString);
+}
+\end{codeboxt}
+
+在上面的代码中，我们创建了一个可以持有整数、浮点数或字符串值的 variant 类。随后对 \texttt{PrintVisitor} 的调用会输出 variant 当前的值。
+
+请注意，得益于泛型 Lambda，这个访问者可以支持所有（实现了 \texttt{<<} 运算符的）类型。
+
+现在，我们又调用了一次 \texttt{std::visit}，它就地创建了一个访问者，包含三个不同的 Lambda 表达式 —— 每种类型各一个。在这个人为构造的示例中，我们想把值乘以二；而对于字符串，这意味着把值拼接在一起。
+
+\section{使用 Lambda 表达式进行并发执行}
+
+很容易举出一些例子，说明 Lambda 表达式在与调用者相同的线程上运行。但异步的情况又如何呢？如果你想在独立的线程上调用 Lambda 表达式呢？你可能会遇到哪些问题？本节我们就来回顾一下这些问题。
+
+
+本节不会作为在 C++ 中编写并发代码的教程，而是旨在展示在异步代码中使用 Lambda 表达式时可能遇到的问题。
+
+如果想进一步了解 C++ 中的并发，你可以参考一些专门的书籍，例如 Rainer Grimm 所著的《Concurrency with Modern C++》\footnote{\url{https://amzn.to/2Zl0M0r}} 或 Anthony Williams 所著的《C++ Concurrency in Action》\footnote{\url{https://amzn.to/2Zl0M0r}}。
+
+\subsection{配合 std::thread 使用 Lambda 表达式}
+
+我们先从 \texttt{std::thread} 开始，它自 C++11 起就可用。你可能已经知道，\texttt{std::thread} 的构造函数接受一个可调用对象。它可以是一个普通的函数指针、一个函数对象，或者一个 Lambda 表达式。下面是一个简单的例子：
+
+\begin{codeboxt}{代码清单 4.15 将 Lambda 表达式传递给线程（在线代码见 @Coliru）}
+#include <iostream>
+#include <thread>
+#include <vector>
+#include <numeric> // 用于 std::iota
+int main() {
+const auto printThreadID = [](const char* str) {
+std::cout << str << ": "
+<< std::this_thread::get_id() << " thread id\n";
+};
+std::vector<int> numbers(100);
+std::thread iotaThread([&numbers, &printThreadID](int startArg) {
+std::iota(numbers.begin(), numbers.end(), startArg);
+printThreadID("iota in");
+}, 10
+);
+iotaThread.join();
+printThreadID("printing numbers in");
+for (const auto& num : numbers)
+std::cout << num << ", ";
+}
+\end{codeboxt}
+
+在上面的示例中，我们使用一个 Lambda 表达式创建了一个线程。\texttt{std::thread} 类的构造函数很灵活，因此我们甚至可以为实参传入一个值。在我们的代码中，\texttt{10} 作为 \texttt{startArg} 被传入 Lambda 表达式。
+
+这段代码很简单，因为我们可以控制线程的执行，并且通过 \texttt{join} 它，我们知道 \texttt{iota} 的结果在我们打印之前就已经准备好了。
+
+需要记住的关键一点是，尽管 Lambda 表达式让创建线程变得轻松便捷，但它仍然是异步执行。闭包并非“特殊”的，同样也容易受到所有竞态条件和阻塞问题的影响。
+
+下面的例子就说明了这一点：
+
+\begin{codeboxt}{代码清单 4.16 由多个线程更新共享变量（在线代码见 @Wandbox）}
+#include <iostream>
+#include <thread>
+#include <vector>
+int main() {
+int counter = 0;
+const auto maxThreads = std::thread::hardware_concurrency();
+std::vector<std::thread> threads;
+threads.reserve(maxThreads);
+for (size_t tCounter = 0; tCounter < maxThreads; ++tCounter) {
+threads.push_back(std::thread([&counter]() noexcept {
+for (int i = 0; i < 1000; ++i) {
+++counter;
+--counter;
+++counter;
+--counter;
+}
+}));
+}
+for (auto& thread : threads)
+thread.join();
+std::cout << counter << '\n';
+}
+\end{codeboxt}
+
+在这个例子中，我们创建了多个线程\footnote{\texttt{std::thread::hardware\_concurrency()} 是一个静态成员函数，返回并发线程的数量}，每个线程都对 \texttt{counter} 变量执行一些计算。该变量在所有线程之间共享。
+
+
+在 C++20 中，你可以使用 \texttt{std::jthread}，它是一种在析构时自动 \texttt{join} 并且还接受停止令牌（stop token）的线程。这种新型线程对象允许对线程执行进行更多的控制。
+
+尽管你可能期望 \texttt{counter} 的最终值为 0，但结果是不确定的。一个线程可能在读取该值的同时，其他线程正在写入它，导致最终结果不可确定。
+
+\begin{codebox}
+0
+0
+10
+-3
+\end{codebox}
+
+与常规的线程场景一样，要解决这个问题，我们应当使用某种同步机制。在本例中，我们可以使用原子操作（atomics），因为它看起来最容易使用。
+
+\begin{codeboxt}{代码清单 4.17 使用原子操作改变值（在线代码见 @Wandbox）}
+#include <iostream>
+#include <thread>
+#include <vector>
+int main() {
+std::atomic<int> counter = 0;
+const auto maxThreads = std::thread::hardware_concurrency();
+std::vector<std::thread> threads;
+threads.reserve(maxThreads);
+for (size_t tCounter = 0; tCounter < maxThreads; ++tCounter) {
+threads.push_back(std::thread([&counter]() noexcept {
+for (int i = 0; i < 1000; ++i) {
+counter.fetch_add(1);
+counter.fetch_sub(1);
+counter.fetch_add(1);
+counter.fetch_sub(1);
+}
+}));
+}
+for (auto& thread : threads)
+thread.join();
+std::cout << counter.load() << '\n';
+}
+\end{codeboxt}
+
+上面的代码按预期工作，因为现在递增和递减操作是原子的。这意味着当 \texttt{counter} 的值发生变化时，其他线程无法中断这一操作。同步使代码更安全，但代价是性能。不过，这是一个需要更长篇幅讨论、且适合单独成书的话题。
+
+
+解决同步问题的另一种方案是：在每个执行计算的线程中设置一个局部变量。然后，在线程结束之前，我们再加锁并更新全局值。另外值得一提的是，将变量定义为 \texttt{volatile} 并不能提供正确的同步。而且在 C++20 中，\texttt{volatile} 在许多地方已被废弃。
+
+正如我们所见，使用 Lambda 表达式创建线程相当方便。它对执行线程来说是局部的，而且你可以像使用普通函数或函数对象一样做所有事情。现在我们来尝试 C++ 中提供的另一种技术。
+
+\subsection{配合 std::async 使用 Lambda 表达式}
+
+你还可以借助 \texttt{std::async} 来利用多线程，这是第二种方式。我们与线程一起在 C++11 中获得了这一功能。它是一个高层 API，允许你惰性（lazily）或完全异步地设置和调用计算。
+
+我们把下面的 \texttt{iota} 示例改写成 \texttt{async} 调用：
+
+\begin{codeboxt}{代码清单 4.18 使用 std::async 异步调用代码（在线代码见 @Coliru）}
+#include <iostream>
+#include <future>
+// 用于 async 和 future
+#include <vector>
+#include <numeric> // 用于 std::iota
+int main() {
+const auto printThreadID = [](const char* str) {
+std::cout << str << ": "
+<< std::this_thread::get_id() << " thread id\n";
+};
+std::vector<int> numbers(100);
+std::future<void> iotaFuture = std::async(std::launch::async,
+[&numbers, startArg = 10, &printThreadID]() {
+std::iota(numbers.begin(), numbers.end(), startArg);
+printThreadID("iota in");
+}
+);
+iotaFuture.get(); // 确保我们拿到结果……
+printThreadID("printing numbers in");
+for (const auto& num : numbers)
+std::cout << num << ", ";
+}
+\end{codeboxt}
+
+这一次，我们依赖的不是线程，而是 \texttt{std::future} 的机制。这是一个对象，它负责处理同步，并保证当我们通过 \texttt{.get()} 请求时，调用的结果是可用的。
+
+在我们的例子中，我们通过 \texttt{std::async} 安排 Lambda 表达式的执行，然后需要调用 \texttt{.get()} 来完成计算。\texttt{.get()} 成员函数是阻塞式的。
+
+不过上面的代码有点“作弊”，因为我们使用的是 \texttt{future<void>}，而且 vector 仍然作为被 Lambda 表达式按引用捕获的变量传入。作为替代方案，你可能想创建一个 \texttt{std::future<std::vector<int>>}，以便我们通过 future 机制来传递 vector：
+
+\begin{codebox}
+std::future<std::vector<int>> iotaFuture = std::async(std::launch::async,
+[startArg = 10]() {
+std::vector<int> numbers(100);
+std::iota(numbers.begin(), numbers.end(), startArg);
+std::cout << "calling from: "
+<< std::this_thread::get_id() << " thread id\n";
+return numbers;
+}
+);
+auto vec = iotaFuture.get(); // 确保我们拿到结果……
+// ...
+\end{codebox}
+
+看起来这些年来 \texttt{std::async/std::future} 落得了一个毁誉参半的名声。似乎这一功能当时有点过于仓促。它在相对简单的情况下能正常工作，但在以下这类高级场景中却会失效：
+
+\begin{itemize}
+\item 延续（continuation），
+\item 任务合并（task merging），
+\item 无法取消 / 加入（joining），
+\item 它不是常规类型，
+\item 以及其他一些问题。
+\end{itemize}
+
+如果你想了解更多，可以阅读或观看以下资源：
+
+\begin{itemize}
+\item There is a Better Future - Felix Petriconi - code::dive 2018 - YouTube\footnote{\url{https://www.youtube.com/watch?v=WZdKFlH7qxo}}
+\item code::dive 2016 conference – Sean Parent – Better Code: Concurrency - YouTube\footnote{\url{https://www.youtube.com/watch?v=p8d28t4qCTY&feature=emb_logo}}
+\item Core C++ 2019 :: Avi Kivity :: Building efficient I/O intensive applications with Seastar - YouTube\footnote{\url{https://www.youtube.com/watch?v=p8d28t4qCTY&feature=emb_logo}}\footnote{\url{https://www.youtube.com/watch?v=WZdKFlH7qxo}}
+\end{itemize}
+
+\subsection{Lambda 表达式与 C++17 的并行算法}
+
+在讨论了 C++11 中的线程支持之后，我们可以转向更新的标准：C++17。这一次，你有了一个极易使用的技术，可以让你并行化标准库中的大多数算法。你所要做的只是为算法指定第一个实参，例如：
+
+\begin{codebox}
+auto myVec = GenerateVector();
+std::sort(std::execution::par, myVec.begin(), myVec.end());
+\end{codebox}
+
+请注意第一个实参：\texttt{std::execution::par}。它用于启用 sort 算法的并行执行。
+
+我们还有其他可选策略：
+
+\noindent
+\begin{tabularx}{\textwidth}{|l|X|}
+\hline
+策略名称 & 说明 \\
+\hline
+\texttt{sequenced\_policy} & 它是一种执行策略类型，作为唯一类型用于消除并行算法重载的歧义，并要求并行算法的执行不被并行化。 \\
+\hline
+\texttt{parallel\_policy} & 它是一种执行策略类型，作为唯一类型用于消除并行算法重载的歧义，并表明并行算法的执行可以被并行化。 \\
+\hline
+\texttt{parallel\_unsequenced\_policy} & 它是一种执行策略类型，作为唯一类型用于消除并行算法重载的歧义，并表明并行算法的执行既可以被并行化，也可以被向量化。 \\
+\hline
+\end{tabularx}
+
+对于每种策略，我们都有一个预定义的全局实例，你可以将其传给算法：
+
+\begin{codebox}
+• std::execution::par
+• std::execution::seq
+• std::execution::par_unseq
+\end{codebox}
+
+执行策略的声明和全局对象位于 \texttt{<execution>} 头文件中。
+
+
+在 C++20 中，还有另一种执行策略：\texttt{unsequenced\_policy}，以及全局实例 \texttt{std::execution::unseq}。它用于启用单线程上的向量化执行。
+
+尽管我们可以轻松启用并行排序，但也可能很快写出一些糟糕的代码：
+
+\begin{codeboxt}{代码清单 4.19 复制到 vector 中的危险行为}
+#include <iostream>
+#include <vector>
+#include <numeric>
+#include <execution>
+int main() {
+std::vector<int> vec(1000);
+std::iota(vec.begin(), vec.end(), 0);
+std::vector<int> output;
+std::for_each(std::execution::par, vec.begin(), vec.end(),
+[&output](int& elem) {
+if (elem % 2 == 0) {
+output.push_back(elem);
+}
+});
+for (const auto& elem : output)
+std::cout << elem << ", ";
+}
+\end{codeboxt}
+
+
+上面的代码没有任何“在线代码”链接，因为它需要一个支持并行算法的编译器。这在 MSVC（从 VS 2017 开始）中是可行的，但与任何在线编译器配合得都不太好。你可以拿这段代码在 Visual Studio 里自行试验。
+
+你能看出这里所有的问题吗？
+
+通过将 Lambda 表达式传给 \texttt{std::for\_each}，我们需要记住：执行并不是在单个线程上、在本地进行的。这里可能会使用多个线程，例如采用线程池方案。这就是为什么访问一个共享的 \texttt{output} vector 并不是个好主意。它不仅可能以错误的顺序插入元素，而且当多个线程试图同时修改该 vector 时，甚至可能崩溃。
+
+我们可以通过使用互斥量（mutex）并在每次调用 \texttt{push\_back} 之前对其加锁来解决同步问题。但那段代码仍然高效吗？如果过滤条件简单且执行很快，那么你得到的性能甚至可能比串行版本（\texttt{seq}）更慢。
+
+更不用说，在并行运行的情况下，你并不知道输出 vector 中复制元素的顺序。
+
+本节只展示了并行算法的基本概览，如果你想了解更多信息，请查看以下文章：Bartek's coding blog：The Amazing Performance of C++17 Parallel Algorithms, is it Possible\footnote{\url{https://www.bfilipek.com/2018/11/parallel-alg-perf.html}}\footnote{\url{https://www.bfilipek.com/2018/11/parallel-alg-perf.html}}。
+
+\subsection{Lambda 表达式与异步——小结}
+
+总结一下：当你想要启动一个线程、通过 \texttt{std::async} 调用异步代码，或者与并行算法配合使用时，Lambda 表达式都很方便。然而，必须牢记的是，闭包对象在并发方面并无特殊之处，这里同样适用所有的挑战。
+
+\section{小结}
+
+在本章中，你已经看到 C++17 把 C++ 的两个重要组成部分结合在了一起：\texttt{constexpr} 与 Lambda 表达式。现在你可以在 \texttt{constexpr} 上下文中使用 Lambda 表达式了！这是朝着改进语言元编程支持迈出的重要一步。在下一章关于 C++20 的内容中，我们会看到更多这样的特性。
+
+此外，C++17 标准解决了捕获 \texttt{this} 指针的问题。在新标准中，你可以通过复制到 \texttt{*this} 对象来按值捕获 \texttt{this}，从而使代码更加安全。
+
+我们还了解了一些 Lambda 表达式的使用场景：IIFE 技术、折叠表达式（fold expressions）与可变参数泛型 Lambda 表达式、从 Lambda 表达式派生，以及异步代码的执行。得益于 C++17 中启用的各种特性，我们现在拥有了更优雅的语法，以及编写高效代码的更直接方式。
