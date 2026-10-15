@@ -84,74 +84,9 @@ xelatex -shell-escape -interaction=nonstopmode -file-line-error main.tex
 
 ---
 
-## 封面与提示框
 
-- **封面**（`book/content/front/00-title.tex`）：直接嵌入**英文原版封面图片**
-  `images/cover_original.png`（由原书 PDF 第 1 页渲染）。保持原图比例，按页面高度缩放并居中，
-  不拉伸、不裁切文字。较之 TikZ 重绘版式更忠实于原书，且对编译遍数无特殊要求
-  （`build.bat` 仍连跑三遍以稳定目录与书签）。
-- **提示框**：原书**没有**任何文字标签（NOTE/TIP/WARNING 都不存在），所谓"标签"
-  就是页边图标。本项目沿用原书两个图标：
-  - `images/icon_info.png`（ℹ 信息框）
-  - `images/icon_warning.png`（⚠ 警告框）
-  导言区提供三个无参数环境：`myInfoBox`（左侧信息图标 + 正文缩进）、
-  `myWarnBox`（左侧警告图标 + 正文缩进）、`myQuote`（灰底细边框引用框，常用于引用 C++ 标准）。
+> 如果环境配置遇到问题或者编译失败可以直接到[releases](https://github.com/jnulzl/CXX-Lambda-Story-CN/releases)下载最新的pdf文件
+> 
+## 官方代码
 
----
-
-## 正文插图说明
-
-原书正文以代码清单、注释框、提示框为主，**真正的光栅插图很少**。已抽取并保留 5 张有内容的图：
-
-- `fig_p028_1.png`：C++11 中的 Lambda 语法
-- `fig_p094_1.png`：C++17 中的 Lambda 语法
-- `fig_p126_1.png`：C++20 中的 Lambda 语法
-- `fig_p147_1.png`：编译时间对比
-- `fig_p148_1.png`：在源文件中的来回跳转
-
-抽取阶段曾把若干原书页面里的占位图存成纯黑 PNG，已在整理时删除，仅保留上述有内容的图。
-
----
-
-## 索引
-
-本工程**包含原书末尾的 Index 章节**（双栏排版），位于 `book/content/back/03-index.tex`，
-由 `book/index.tex` 以 `\myFront{索引}{...}` 装配。参考文献与索引是相互独立的两节
-（`02-references.tex` 与 `03-index.tex`），已在整理时拆分清楚。
-
----
-
-## 已知坑与约定
-
-1. **minted v3 缓存必须绝对路径**：`latexminted` 拒绝相对路径写入，默认的 `_minted`
-   缓存会全部失败（报 `Cannot write file "_xxx.index.minted" outside working directory`）。
-   已在 `book/ccs.tex` 把 `\minted@cachedir` 设成 `TEXMF_OUTPUT_DIRECTORY` / `TEXMFOUTPUT`
-   给出的工程绝对根；`build.bat` 会自动设置这两个变量，手动编译时也务必先 `export`。
-2. **LaTeX 转义铁律**：`\texttt{}` 不改变字符类别，`_ # % &` 仍需转义；
-   `\url{}` 中 `_` 直接写、`# %` 必须转义；代码体 / `minted` 内部无需转义。
-3. **章节装配**：增删/调序章节只改 `book/index.tex` 里的 `\myChapter{}` / `\myAppendix{}`
-   / `\myFront{}` 行即可，无需动其它文件。
-4. **代码清单可选参数**：`\begin{codebox}`（无标题）与 `\begin{codeboxt}{标题}`（带标题）
-   已确认可用；不要在 `codebox` 后误加方括号语言参数，否则会被当成未知语言名。
-
----
-
-## 字体映射
-
-| 用途 | 字体 |
-|---|---|
-| 中文正文（衬线） | Source Han Serif SC（思源宋体） |
-| 中文标题（无衬线） | Microsoft YaHei（微软雅黑） |
-| 拉丁正文 | Cambria（替代原书商用 New Baskerville） |
-| 拉丁标题 | Franklin Gothic Medium |
-| 代码 / 等宽 | Consolas |
-| 代码块中的中文注释 | Microsoft YaHei |
-
----
-
-## 工作流（供复核）
-
-1. 从原书 PDF 用 `../work/extract_lambda.py` 提取章节文本（`../work/chapters/*.txt`）。
-2. 对照 `../work/TRANSLATION_GUIDE.md` 翻译，产出 `book/content/**/*.tex`；
-   多段章节经 `../work/assemble.py` 装配，再由 `../work/escape_special.py` 做转义后处理。
-3. 按上节命令（或 `build.bat`）编译，检查 `main.log` 无报错、目视核对封面与提示框。
+[cpplambdastory-code](https://github.com/fenbf/cpplambdastory-code) —— 书中示例代码。
